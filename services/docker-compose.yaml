@@ -1,0 +1,20 @@
+# https://docs.docker.com/compose/compose-file
+# docker-compose up
+# docker-compose stop
+# docker-compose down
+version: '3'
+
+networks:
+  shared-network:
+    driver: bridge
+
+services:
+  searchd:
+    networks:
+      - shared-network
+    build:
+      context: .
+      dockerfile: './dockerfile.searchd'
+    ports:
+    - '8080:8080'
+    restart: on-failure

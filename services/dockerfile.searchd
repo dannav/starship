@@ -1,0 +1,13 @@
+FROM ubuntu:bionic
+
+RUN set -ex; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        ca-certificates;
+
+WORKDIR /opt
+COPY ./bin/searchd .
+
+EXPOSE 8080
+
+CMD ["./searchd"]
