@@ -1,13 +1,17 @@
-FROM ubuntu:bionic
+# multi stage docker build
+# since we have spotify/annoy (which is cgo) we gotta build in this docker container first
+# with all of the application dependencies
+FROM alpine:3.8 AS build
+RUN apk add --update go=1.10.7-r0 gcc g++ dep git
+WORKDIR /root/go/src/github.com/dannav/starship/services
+COPY . .
+RUN dep ensure
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o ./bin/searchd ./cmd/searchd
 
-RUN set -ex; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends \
-        ca-certificates;
-
+# need to install certificates for SSL and spotify/annoy bindings (c++ stdlib)
+FROM alpine:3.8
 WORKDIR /opt
-COPY ./bin/searchd .
-
+RUN apk add --update ca-certificates gcc
+COPY --from=build /root/go/src/github.com/dannav/starship/services/bin/searchd .
 EXPOSE 8080
-
 CMD ["./searchd"]

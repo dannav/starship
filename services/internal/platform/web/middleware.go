@@ -3,12 +3,12 @@ package web
 import (
 	"bufio"
 	"errors"
-	"log"
 	"net"
 	"net/http"
 	"time"
 
 	"github.com/pborman/uuid"
+	log "github.com/sirupsen/logrus"
 )
 
 const requestIDHeader = "X-Request-Id"
@@ -33,6 +33,7 @@ func (w *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if !ok {
 		return nil, nil, errors.New("ResponseWriter does not implement http.Hijacker")
 	}
+
 	return h.Hijack()
 }
 
@@ -41,7 +42,6 @@ func (w *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 // end of each request.
 func RequestMW(next http.Handler) http.Handler {
 	f := func(w http.ResponseWriter, r *http.Request) {
-
 		st := time.Now()
 
 		ww := &responseWriter{
@@ -50,13 +50,19 @@ func RequestMW(next http.Handler) http.Handler {
 		}
 
 		// Check if request ID was passed in header. Otherwise, generate one.
-		id := r.Header.Get("X-Request-Id")
+		id := r.Header.Get(requestIDHeader)
 		if id == "" {
 			id = uuid.New()
 		}
 
 		defer func() {
-			log.Printf("%s %s - complete [%s] %d - %s", r.Method, r.RequestURI, time.Since(st), ww.status, id)
+			log.WithFields(log.Fields{
+				"method":      r.Method,
+				"requestID":   id,
+				"requestURI":  r.RequestURI,
+				"requestTime": time.Since(st),
+				"status":      ww.status,
+			}).Info("completed request")
 		}()
 
 		ww.Header().Set(requestIDHeader, id)

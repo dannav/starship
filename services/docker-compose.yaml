@@ -1,20 +1,49 @@
-# https://docs.docker.com/compose/compose-file
-# docker-compose up
-# docker-compose stop
-# docker-compose down
 version: '3'
-
 networks:
   shared-network:
     driver: bridge
-
 services:
-  searchd:
+  serving: # a production grade rest / grpc api for machine learning models
+    image: tensorflow/serving
     networks:
       - shared-network
+    ports:
+      - '8501:8501'
+    volumes:
+      - ../ai/tfserving/use:/models/universal_encoder
+    environment:
+      MODEL_NAME: "universal_encoder"
+  db: # postgres database
+    image: postgres:11.0-alpine
+    networks:
+      - shared-network
+    ports:
+      - 5432:5432
+    volumes:
+      - db:/var/lib/postgresql
+    environment:
+      POSTGRES_PASSWORD: "password"
+  searchd: # search / indexing api
     build:
       context: .
       dockerfile: './dockerfile.searchd'
+    networks:
+      - shared-network
     ports:
     - '8080:8080'
     restart: on-failure
+    environment:
+      POSTGRES_DSN: "user=postgres password=password host=db dbname=postgres sslmode=disable"
+      SERVING_URL: "serving:8501/v1/models/universal_encoder:predict"
+      TIKAD_URL: "tikad:8080"
+  tikad: # apache tika parsing api
+    build:
+      context: .
+      dockerfile: './dockerfile.tikad'
+    networks:
+      - shared-network
+    ports:
+    - '8081:8080'
+    restart: on-failure
+volumes:
+  db:
