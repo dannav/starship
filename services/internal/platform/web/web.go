@@ -2,10 +2,10 @@ package web
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 )
 
 // ErrInternalServer is a generic internal server error.
@@ -33,7 +33,10 @@ func Respond(w http.ResponseWriter, r *http.Request, code int, data interface{},
 
 	if len(errs) > 0 {
 		for _, err := range errs {
-			log.Print("error while serving request", "err", err)
+			log.WithFields(log.Fields{
+				"error": err,
+			}).Error("error while serving request")
+
 			errors = append(errors, ResponseError{Message: err.Error()})
 		}
 	}
@@ -49,10 +52,11 @@ func Respond(w http.ResponseWriter, r *http.Request, code int, data interface{},
 // RespondError sends an error response with a status code. The error is automatically logged for you.
 // If the error implements StatusCoder, the provided status code will be used.
 func RespondError(w http.ResponseWriter, r *http.Request, code int, err error) {
-	log.Print("error while serving request", "err", err)
+	log.WithFields(log.Fields{
+		"error": err,
+	}).Error("error while serving request")
 
-	if code >= http.StatusInternalServerError {
-
+	if code >= http.StatusInternalServerError && code != http.StatusServiceUnavailable {
 		// Respond with generic error. Error messages and and codes may potentially contain
 		// sensitive information or help an attacker.
 		code = http.StatusInternalServerError
@@ -80,6 +84,7 @@ func writeResponse(w http.ResponseWriter, r *http.Request, code int, resp *Respo
 
 	b, err := json.Marshal(resp)
 	if err != nil {
+		err = errors.Wrap(err, "marshalling response")
 		RespondError(w, r, http.StatusInternalServerError, err)
 		return
 	}

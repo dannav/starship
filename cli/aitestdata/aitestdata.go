@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/google/go-github/v18/github"
+	"github.com/google/go-github/github"
 	"github.com/pkg/errors"
-	stripmd "github.com/writeas/go-strip-markdown"
+	"golang.org/x/oauth2"
 )
 
 var helpText = `
@@ -65,7 +65,13 @@ func main() {
 		return
 	}
 
-	client := github.NewClient(nil)
+	// authenticate with github oauth2 api
+	token := os.Getenv("TOKEN")
+	ctx := context.Background()
+	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
+	tc := oauth2.NewClient(ctx, ts)
+
+	client := github.NewClient(tc)
 	searchCtx := context.Background()
 
 	// search for $$lang repos with highest stars
@@ -137,11 +143,16 @@ func main() {
 		// create isolated scope
 		{
 			// convert markdown to plain text
-			stripped := stripmd.Strip(content)
+			// stripped := stripmd.Strip(content)
+
+			// readme := Readme{
+			// 	Repo:    fmt.Sprintf("%v/%v", owner, repoName),
+			// 	Content: stripped,
+			// }
 
 			readme := Readme{
 				Repo:    fmt.Sprintf("%v/%v", owner, repoName),
-				Content: stripped,
+				Content: content,
 			}
 
 			readmes = append(readmes, readme)
