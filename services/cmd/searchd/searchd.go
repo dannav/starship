@@ -21,13 +21,13 @@ import (
 
 const (
 	// readTimeout is timeout for reading the request.
-	readTimeout = 5 * time.Second
+	readTimeout = 30 * time.Second
 
 	// writeTimeout is timeout for reading the response.
-	writeTimeout = 10 * time.Second
+	writeTimeout = 30 * time.Second
 
 	// shutdownTimeout is the timeout for shutdown.
-	shutdownTimeout = 5 * time.Second
+	shutdownTimeout = 30 * time.Second
 
 	// appPort is the port that the application listens on
 	appPort = 8080
@@ -115,6 +115,12 @@ func main() {
 		return
 	}
 
+	// Create db indexes
+	if _, err := dba.Exec(db.Indexes); err != nil {
+		mainErr = errors.Wrap(err, "creating database indexes")
+		return
+	}
+
 	// Run db seed
 	for _, s := range db.Seed {
 		if _, err := dba.Exec(s); err != nil {
@@ -125,7 +131,7 @@ func main() {
 
 	// force 10 second timeouts on all http requests
 	client := &http.Client{
-		Timeout: time.Second * 10,
+		Timeout: time.Second * 30,
 	}
 
 	cfg := handlers.Cfg{
@@ -135,9 +141,6 @@ func main() {
 
 	// Start API
 	// ===============
-
-	// TODO :- https://github.com/spotify/annoy/blob/master/README_GO.rst
-	// create annoy index for dev use
 
 	app := handlers.NewApp(cfg, dba, client)
 	server := http.Server{

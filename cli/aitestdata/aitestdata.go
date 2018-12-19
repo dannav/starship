@@ -1,14 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
+	"mime/multipart"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/go-github/github"
@@ -17,8 +22,8 @@ import (
 )
 
 var helpText = `
-This application downloads readmes from top github repositories to use as test data for building
-a semantic search index.
+This application downloads readmes from top github repositories and indexes them
+with the searchd api to use as test data for building a semantic search index.
 
 Usage:
 	testdata [arguments]
@@ -39,6 +44,10 @@ Possible arguments are:
 type Readme struct {
 	Repo    string `json:"repo"`
 	Content string `json:"content"`
+}
+
+var client = &http.Client{
+	Timeout: time.Second * 30,
 }
 
 func main() {
@@ -72,28 +81,44 @@ func main() {
 	tc := oauth2.NewClient(ctx, ts)
 
 	client := github.NewClient(tc)
-	searchCtx := context.Background()
 
-	// search for $$lang repos with highest stars
+	// search first 4 pages for $$lang repos with highest stars
+	var results []github.Repository
+
 	query := fmt.Sprintf("language:%v&sort=stars", lang)
-	result, resp, err := client.Search.Repositories(searchCtx, query, nil)
-	if err != nil {
-		if _, ok := err.(*github.RateLimitError); ok {
-			HandleRateLimit(resp)
-
-			// rerun request
-			result, _, _ = client.Search.Repositories(searchCtx, query, nil)
-		} else {
-			log.Fatal(errors.Wrap(err, "searching repositories"))
-		}
+	result, resp := RunSearch(client, query)
+	if resp.NextPage != resp.LastPage {
+		query = fmt.Sprintf("%v&page=%v", query, resp.NextPage)
 	}
+	results = append(results, result.Repositories...)
 
-	log.Printf("Processing %v repositories.\n", len(result.Repositories))
+	result2, resp := RunSearch(client, query)
+	if resp.NextPage != resp.LastPage {
+		query = fmt.Sprintf("%v&page=%v", query, resp.NextPage)
+	}
+	results = append(results, result2.Repositories...)
+
+	result3, resp := RunSearch(client, query)
+	if resp.NextPage != resp.LastPage {
+		query = fmt.Sprintf("%v&page=%v", query, resp.NextPage)
+	}
+	results = append(results, result3.Repositories...)
+
+	result4, resp := RunSearch(client, query)
+	if resp.NextPage != resp.LastPage {
+		query = fmt.Sprintf("%v&page=%v", query, resp.NextPage)
+	}
+	results = append(results, result4.Repositories...)
+	// finish searching
+
+	log.Printf("Processing %v repositories.\n", len(results))
 	var readmes []Readme
 
-	// get readme for each repository and save to data dir
-	for i := 0; i < len(result.Repositories); i++ {
-		r := result.Repositories[i]
+	// get readme for each unique repository and save to data dir
+	uniqueRepo := map[string]bool{}
+
+	for i := 0; i < len(results); i++ {
+		r := results[i]
 
 		var owner string
 		var repoName string
@@ -142,17 +167,15 @@ func main() {
 
 		// create isolated scope
 		{
-			// convert markdown to plain text
-			// stripped := stripmd.Strip(content)
-
-			// readme := Readme{
-			// 	Repo:    fmt.Sprintf("%v/%v", owner, repoName),
-			// 	Content: stripped,
-			// }
-
 			readme := Readme{
 				Repo:    fmt.Sprintf("%v/%v", owner, repoName),
 				Content: content,
+			}
+
+			if _, ok := uniqueRepo[readme.Repo]; ok {
+				continue
+			} else {
+				uniqueRepo[readme.Repo] = true
 			}
 
 			readmes = append(readmes, readme)
@@ -178,6 +201,33 @@ func main() {
 	if err != nil {
 		log.Fatal(errors.Wrap(err, "error writing file"))
 	}
+
+	for _, r := range readmes {
+		err := Index(strings.NewReader(r.Content), fmt.Sprintf("%v/%v", r.Repo, "README.md"))
+		if err != nil {
+			log.Print(err)
+			log.Print("error indexing README " + r.Repo)
+			continue
+		}
+	}
+}
+
+// RunSearch runs a github repository search
+func RunSearch(client *github.Client, query string) (*github.RepositoriesSearchResult, *github.Response) {
+	searchCtx := context.Background()
+	result, resp, err := client.Search.Repositories(searchCtx, query, nil)
+	if err != nil {
+		if _, ok := err.(*github.RateLimitError); ok {
+			HandleRateLimit(resp)
+
+			// rerun request
+			result, _, _ = client.Search.Repositories(searchCtx, query, nil)
+		} else {
+			log.Fatal(errors.Wrap(err, "searching repositories"))
+		}
+	}
+
+	return result, resp
 }
 
 // HandleRateLimit sleeps until the github API rate limit resets
@@ -185,4 +235,43 @@ func HandleRateLimit(resp *github.Response) {
 	log.Printf("Hit rate limit. Waiting until %v to resume operation.\n", resp.Rate.Reset.Time)
 	until := time.Until(resp.Rate.Reset.Time)
 	time.Sleep(until)
+}
+
+// Index indexes a readme file with the searchd api
+func Index(file io.Reader, filename string) error {
+	var buf bytes.Buffer
+	encoder := multipart.NewWriter(&buf)
+	field, err := encoder.CreateFormFile("content", filename)
+	if err != nil {
+		err = errors.Wrap(err, "creating content form field for searchd request")
+		return err
+	}
+
+	_, err = io.Copy(field, file)
+	if err != nil {
+		err = errors.Wrap(err, "copying file to searchd request")
+		return err
+	}
+	encoder.Close()
+
+	endpoint := "http://localhost:8080/v1/index"
+	req, err := http.NewRequest(http.MethodPost, endpoint, &buf)
+	if err != nil {
+		err = errors.Wrap(err, "preparing searchd request")
+		return err
+	}
+	req.Header.Set("Content-Type", encoder.FormDataContentType())
+
+	res, err := client.Do(req)
+	if err != nil {
+		err = errors.Wrap(err, "performing searchd request")
+		return err
+	}
+
+	if res.StatusCode != http.StatusNoContent {
+		err = errors.New("searchd request failed")
+		return err
+	}
+
+	return nil
 }

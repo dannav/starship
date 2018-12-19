@@ -1,4 +1,4 @@
-get-test-data:
+run:
 	rm -rf bin
 	rm -rf files
 	mkdir -p bin

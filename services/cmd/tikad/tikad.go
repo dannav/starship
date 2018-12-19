@@ -19,13 +19,13 @@ import (
 
 const (
 	// readTimeout is timeout for reading the request.
-	readTimeout = 5 * time.Second
+	readTimeout = 30 * time.Second
 
 	// writeTimeout is timeout for reading the response.
-	writeTimeout = 10 * time.Second
+	writeTimeout = 30 * time.Second
 
 	// shutdownTimeout is the timeout for shutdown.
-	shutdownTimeout = 5 * time.Second
+	shutdownTimeout = 30 * time.Second
 
 	// appPort is the port that the application listens on
 	appPort = 8080
@@ -66,7 +66,7 @@ func main() {
 
 	// force 10 second timeouts on all http requests
 	client := &http.Client{
-		Timeout: time.Second * 10,
+		Timeout: time.Second * 30,
 	}
 
 	opts := tika.WithPort("9998")
