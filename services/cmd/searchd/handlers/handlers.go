@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"runtime"
 
 	"github.com/dannav/starship/services/internal/document"
 	"github.com/dannav/starship/services/internal/platform/web"
@@ -59,6 +60,11 @@ func (a *App) initHandler() {
 		log.WithFields(log.Fields{
 			"error": i,
 		}).Error("panic")
+
+		stack := make([]byte, 4096)
+		stack = stack[:runtime.Stack(stack, false)]
+
+		log.Println(string(stack))
 
 		web.RespondError(w, r, http.StatusInternalServerError, web.ErrInternalServer)
 	}

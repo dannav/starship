@@ -17,13 +17,14 @@ const (
 	`
 
 	insertSentence = `
-		INSERT INTO sentence (sentence_id, document_id, store_id, body, embedding)
+		INSERT INTO sentence (sentence_id, document_id, store_id, body, embedding, context)
 		VALUES (
 			:id,
 			:documentID,
 			:storeID,
 			:body,
-			:embedding
+			:embedding,
+			:context
 		) RETURNING *
 	`
 
@@ -46,9 +47,28 @@ const (
 			d.name AS name,
 			d.document_id AS document_id,
 			s.annoy_id AS annoy_id,
-			s.body AS sentence_text
+			s.context AS sentence_text,
+			0.0 AS rel,
+			s.sentence_id AS sentence_id
 		FROM document d
 		INNER JOIN sentence s ON s.document_id = d.document_id
 		WHERE s.annoy_id IN (?)
+	`
+
+	fullTextSearchSentences = `
+		SELECT document_id, annoy_id, name, context as sentence_text, (rel/(rel+1)) as rel, sentence_id FROM (
+			SELECT
+				document.document_id as document_id,
+				document.name as name,
+				context,
+				sentence.annoy_id as annoy_id,
+				to_tsvector(sentence.body) as v,
+				ts_rank(to_tsvector(sentence.body), plainto_tsquery(:text)) as rel,
+				sentence.sentence_id as sentence_id
+			FROM sentence
+			INNER JOIN document ON sentence.document_id = document.document_id
+		) search
+		WHERE search.v @@ plainto_tsquery(:text)
+		ORDER BY rel DESC LIMIT 20;
 	`
 )

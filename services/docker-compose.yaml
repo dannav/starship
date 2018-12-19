@@ -5,6 +5,7 @@ networks:
 services:
   serving: # a production grade rest / grpc api for machine learning models
     image: tensorflow/serving
+    restart: on-failure
     networks:
       - shared-network
     ports:
@@ -15,6 +16,7 @@ services:
       MODEL_NAME: "universal_encoder"
   db: # postgres database
     image: postgres:11.0-alpine
+    restart: on-failure
     networks:
       - shared-network
     ports:
@@ -32,6 +34,8 @@ services:
     ports:
     - '8080:8080'
     restart: on-failure
+    volumes:
+      - searchd:/opt/indexes
     environment:
       POSTGRES_DSN: "user=postgres password=password host=db dbname=postgres sslmode=disable"
       SERVING_URL: "serving:8501/v1/models/universal_encoder:predict"
@@ -46,4 +50,5 @@ services:
     - '8081:8080'
     restart: on-failure
 volumes:
-  db:
+  db: {}
+  searchd: {}

@@ -17,6 +17,8 @@ import (
 	"os"
 	"sort"
 
+	"github.com/dannav/starship/services/internal/shared"
+
 	"github.com/dannav/starship/services/internal/document"
 	"github.com/dannav/starship/services/internal/embedding"
 	annoyindex "github.com/dannav/starship/services/internal/platform/spotify"
@@ -30,53 +32,19 @@ import (
 // vDims represents how many dimensions a spotify/annoy index vector is (sized returned by tensorflow model)
 var vDims = 512
 
-// TikaParse makes a request to the tikad endpoint to parse a file
-func (a *App) TikaParse(file io.Reader, filename string) (string, error) {
-	var parseResp struct {
-		Results string `json:"results"`
+// MimeToDocType translates a tika mimeType to a document type
+var MimeToDocType = map[string]int{
+	"text/plain":      document.TypeMarkdown,
+	"application/pdf": document.TypePDF,
+}
+
+// GetDocType gets the document type from a mimeType
+func GetDocType(s string) int {
+	if _, ok := MimeToDocType[s]; !ok {
+		return document.TypeUnsupported
 	}
 
-	var buf bytes.Buffer
-	encoder := multipart.NewWriter(&buf)
-	field, err := encoder.CreateFormFile("content", filename)
-	if err != nil {
-		err = errors.Wrap(err, "creating content form field for tikad request")
-		return "", err
-	}
-
-	_, err = io.Copy(field, file)
-	if err != nil {
-		err = errors.Wrap(err, "copying file to tikad request")
-		return "", err
-	}
-	encoder.Close()
-
-	endpoint := fmt.Sprintf("http://%v/v1/parse", a.Cfg.TikaURL)
-	req, err := http.NewRequest(http.MethodPost, endpoint, &buf)
-	if err != nil {
-		err = errors.Wrap(err, "preparing tikad request")
-		return "", err
-	}
-	req.Header.Set("Content-Type", encoder.FormDataContentType())
-
-	res, err := a.HTTPClient.Do(req)
-	if err != nil {
-		err = errors.Wrap(err, "performing tikad request")
-		return "", err
-	}
-
-	if res.StatusCode != http.StatusOK {
-		err = errors.New("tikad request failed")
-		return "", err
-	}
-
-	// get response from tikad
-	if err := json.NewDecoder(res.Body).Decode(&parseResp); err != nil {
-		err = errors.Wrap(err, "decoding tikad response")
-		return "", err
-	}
-
-	return parseResp.Results, nil
+	return MimeToDocType[s]
 }
 
 // Index handles creating word embeddings from a multi-parse/file upload and indexing it for search purposes
@@ -91,13 +59,16 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 			return
 		}
 
+		// TODO store the file in block storage so we can download from a search
+
 		// pass file to apache tika for parsing to plaintext
-		content, err := a.TikaParse(file, header.Filename)
+		tikaResp, err := a.TikaParse(file, header.Filename)
 		if err != nil {
 			err = errors.Wrap(err, "contents parse failed")
 			web.RespondError(w, r, http.StatusServiceUnavailable, err)
 			return
 		}
+		content := tikaResp.Body
 
 		// break up text into sentences
 		var inputs []string
@@ -124,9 +95,9 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 		// create document
 		teamID := "1" // TODO replace with user auth
 		d := &document.Document{
-			Body:   content, // TODO we shouldn't store the body but link to a file on cloud storage
+			Body:   content, // we store the content so we can do full text search with postgres
 			Name:   header.Filename,
-			TypeID: document.TypeText,
+			TypeID: GetDocType(tikaResp.DocumentType),
 			TeamID: teamID,
 		}
 
@@ -143,7 +114,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 
 		// create new store for this team if it does not exist
 		s := &store.Store{
-			Location: fmt.Sprintf("%v.ann", teamID),
+			Location: fmt.Sprintf("indexes/%v.ann", teamID),
 			TeamID:   teamID,
 		}
 
@@ -163,8 +134,19 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 				return
 			}
 
+			// build context of sentence (include surrounding sentences)
+			context := inputs[i]
+			if i != 0 {
+				context = fmt.Sprintf("%v%v", inputs[i-1], context)
+			}
+
+			if len(inputs) > i+1 {
+				context = fmt.Sprintf("%v%v", context, inputs[i+1])
+			}
+
 			sen := &document.Sentence{
 				Body:       inputs[i],
+				Context:    context,
 				DocumentID: d.ID,
 				StoreID:    st.ID,
 				Embedding:  emb,
@@ -295,22 +277,122 @@ func (a *App) Search(ds *document.Service, ss *store.Service) func(http.Response
 
 		// sort docs in order of best match
 		var docsSorted []document.SearchResult
-		for _, sid := range sIDs {
+		for i, sid := range sIDs {
 			for _, d := range docs {
 				if d.AnnoyID == sid {
+					d.Rank = distances[i] // set rank to distance
 					docsSorted = append(docsSorted, d)
 				}
 			}
 		}
+
+		ftsDocs, err := ds.FullTextSearch(b.Text)
+		if err != nil {
+			err = errors.Wrap(err, "get search results")
+			web.RespondError(w, r, http.StatusInternalServerError, err)
+			return
+		}
+
+		// Ranking System Process (TODO run tests and tweak this for best results)
+		// =======================================================================
+
+		// 1. Start with distance from searchtext for annoy search results (set above when creating docsSorted)
+
+		// ultimately combine fts results and annoy search results
+		uniqResults := map[string]bool{}
+		docs = []document.SearchResult{}
+
+		// 2. If sentence_id or document_id exists in fts subtract the relevancy in fts from distance
+		for _, d := range docsSorted {
+			for _, f := range ftsDocs {
+				if d.SentenceID.String() == f.SentenceID.String() || d.DocumentID.String() == f.DocumentID.String() {
+					if _, ok := uniqResults[d.SentenceID.String()]; ok {
+						continue
+					} else {
+						uniqResults[d.SentenceID.String()] = true
+					}
+
+					d.Rank = d.Rank - f.Rank
+				}
+			}
+
+			docs = append(docs, d)
+		}
+
+		// 3. use 1 - relevancy as rank for fts results
+		for _, f := range ftsDocs {
+			if _, ok := uniqResults[f.SentenceID.String()]; ok {
+				continue
+			} else {
+				uniqResults[f.SentenceID.String()] = true
+			}
+
+			f.Rank = 1 - f.Rank
+			docs = append(docs, f)
+		}
+
+		// Finally, order by lowest rank first
+		sort.Slice(docs, func(i, j int) bool {
+			return docs[i].Rank < docs[j].Rank
+		})
 
 		result := struct {
 			Distances []float32               `json:"distances"`
 			Results   []document.SearchResult `json:"results"`
 		}{
 			Distances: distances,
-			Results:   docsSorted,
+			Results:   docs,
 		}
 
 		web.Respond(w, r, http.StatusOK, result)
 	}
+}
+
+// TikaParse makes a request to the tikad endpoint to parse a file
+func (a *App) TikaParse(file io.Reader, filename string) (*shared.TikaResponse, error) {
+	var parseResp struct {
+		Results shared.TikaResponse `json:"results"`
+	}
+
+	var buf bytes.Buffer
+	encoder := multipart.NewWriter(&buf)
+	field, err := encoder.CreateFormFile("content", filename)
+	if err != nil {
+		err = errors.Wrap(err, "creating content form field for tikad request")
+		return nil, err
+	}
+
+	_, err = io.Copy(field, file)
+	if err != nil {
+		err = errors.Wrap(err, "copying file to tikad request")
+		return nil, err
+	}
+	encoder.Close()
+
+	endpoint := fmt.Sprintf("http://%v/v1/parse", a.Cfg.TikaURL)
+	req, err := http.NewRequest(http.MethodPost, endpoint, &buf)
+	if err != nil {
+		err = errors.Wrap(err, "preparing tikad request")
+		return nil, err
+	}
+	req.Header.Set("Content-Type", encoder.FormDataContentType())
+
+	res, err := a.HTTPClient.Do(req)
+	if err != nil {
+		err = errors.Wrap(err, "performing tikad request")
+		return nil, err
+	}
+
+	if res.StatusCode != http.StatusOK {
+		err = errors.New("tikad request failed")
+		return nil, err
+	}
+
+	// get response from tikad
+	if err := json.NewDecoder(res.Body).Decode(&parseResp); err != nil {
+		err = errors.Wrap(err, "decoding tikad response")
+		return nil, err
+	}
+
+	return &parseResp.Results, nil
 }

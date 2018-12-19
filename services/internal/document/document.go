@@ -13,8 +13,10 @@ import (
 const (
 	// TypeMarkdown is a markdown document_type_id
 	TypeMarkdown = iota + 1
-	// TypeText is a text document_type_id
-	TypeText
+	// TypePDF is a PDF document_type_id
+	TypePDF
+	// TypeUnsupported is a unsupported document_type_id
+	TypeUnsupported
 
 	// codeDuplicateInsert is the code pg throws on a duplicate insert for a unique constraint
 	codeDuplicateInsert = pq.ErrorCode("23505")
@@ -39,9 +41,11 @@ type Type struct {
 // SearchResult represents search results
 type SearchResult struct {
 	DocumentID   uuid.UUID `json:"id" db:"document_id"`
+	SentenceID   uuid.UUID `json:"sentenceID" db:"sentence_id"`
 	AnnoyID      int       `json:"annoyID" db:"annoy_id"`
 	DocumentName string    `json:"name" db:"name"`
 	Text         string    `json:"text" db:"sentence_text"`
+	Rank         float32   `json:"rel" db:"rel"`
 }
 
 // Document represents a document that was indexed
@@ -63,6 +67,7 @@ type Sentence struct {
 	AnnoyID    int             `db:"annoy_id"`
 	Embedding  json.RawMessage `db:"embedding"`
 	Body       string          `db:"body"`
+	Context    string          `db:"context"`
 	Created    time.Time       `json:"created" db:"created"`
 	Updated    time.Time       `json:"updated" db:"updated"`
 }
@@ -155,6 +160,7 @@ func (s *Service) CreateSentence(i *Sentence) (*Sentence, error) {
 		"storeID":    i.StoreID,
 		"body":       i.Body,
 		"embedding":  i.Embedding,
+		"context":    i.Context,
 	}
 
 	var r Sentence
@@ -177,6 +183,26 @@ func (s *Service) GetSearchResults(sIDs []int) ([]SearchResult, error) {
 	var r []SearchResult
 	if err := s.DB.Select(&r, query, args...); err != nil {
 		return nil, errors.Wrap(err, "search results query")
+	}
+
+	return r, nil
+}
+
+// FullTextSearch performs postgres FTS on sentence bodies to get SearchResults
+func (s *Service) FullTextSearch(text string) ([]SearchResult, error) {
+	stmt, err := s.DB.PrepareNamed(fullTextSearchSentences)
+	if err != nil {
+		return nil, errors.Wrap(err, "preparing fts query")
+	}
+	defer stmt.Close()
+
+	args := map[string]interface{}{
+		"text": text,
+	}
+
+	var r []SearchResult
+	if err := stmt.Select(&r, args); err != nil {
+		return nil, errors.Wrap(err, "ftsquery")
 	}
 
 	return r, nil

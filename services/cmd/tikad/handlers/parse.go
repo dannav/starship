@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/dannav/starship/services/internal/platform/web"
+	"github.com/dannav/starship/services/internal/shared"
 	"github.com/julienschmidt/httprouter"
 	"github.com/pkg/errors"
 	stripmd "github.com/writeas/go-strip-markdown"
@@ -38,9 +39,14 @@ func (a *App) Parse() func(http.ResponseWriter, *http.Request, httprouter.Params
 			buf.ReadFrom(file)
 
 			s := buf.String()
-
 			body := stripmd.Strip(s)
-			web.Respond(w, r, http.StatusOK, body)
+
+			resp := shared.TikaResponse{
+				Body:         body,
+				DocumentType: mimeType,
+			}
+
+			web.Respond(w, r, http.StatusOK, resp)
 			return
 		}
 
@@ -51,6 +57,11 @@ func (a *App) Parse() func(http.ResponseWriter, *http.Request, httprouter.Params
 			return
 		}
 
-		web.Respond(w, r, http.StatusOK, body)
+		resp := shared.TikaResponse{
+			Body:         body,
+			DocumentType: mimeType,
+		}
+
+		web.Respond(w, r, http.StatusOK, resp)
 	}
 }
