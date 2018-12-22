@@ -76,6 +76,7 @@ func (a *App) initHandler() {
 	// api routes
 	r.Handle(http.MethodPost, "/v1/index", a.Index(ds, ss))
 	r.Handle(http.MethodGet, "/v1/search", a.Search(ds, ss))
+	r.Handle(http.MethodGet, "/v1/download", a.DownloadFile())
 
 	// wrap all the routes with global middleware
 	a.handler = web.RequestMW(r)

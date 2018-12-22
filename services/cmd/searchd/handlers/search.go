@@ -9,15 +9,20 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/dannav/starship/services/internal/shared"
+	"github.com/google/uuid"
+	minio "github.com/minio/minio-go"
 
 	"github.com/dannav/starship/services/internal/document"
 	"github.com/dannav/starship/services/internal/embedding"
@@ -38,6 +43,11 @@ var MimeToDocType = map[string]int{
 	"application/pdf": document.TypePDF,
 }
 
+// Digital Ocean Spaces info
+var doKey = "E7GJPSBYFMF5SJU7P4TC"
+var doSecret = "N/K398tqDdLak67JrXYMzYEW/a1juFhC3rSxVuC5s5M"
+var spacesURL = "sfo2.digitaloceanspaces.com"
+
 // GetDocType gets the document type from a mimeType
 func GetDocType(s string) int {
 	if _, ok := MimeToDocType[s]; !ok {
@@ -47,9 +57,49 @@ func GetDocType(s string) int {
 	return MimeToDocType[s]
 }
 
-// Index handles creating word embeddings from a multi-parse/file upload and indexing it for search purposes
+// DownloadFile handles downloading a file from blob storage
+func (a *App) DownloadFile() func(http.ResponseWriter, *http.Request, httprouter.Params) {
+	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		file := r.URL.Query().Get("file")
+		client, err := minio.New(spacesURL, doKey, doSecret, true)
+		if err != nil {
+			err = errors.Wrap(err, "connecting to do spaces")
+			web.RespondError(w, r, http.StatusInternalServerError, err)
+			return
+		}
+
+		opts := minio.GetObjectOptions{}
+		o, err := client.GetObject("stuph", file, opts)
+		if err != nil {
+			err = errors.Wrap(err, "downloading file")
+			web.RespondError(w, r, http.StatusInternalServerError, err)
+			return
+		}
+
+		// get filename by copying everything after last "/" in path
+		filename := file[strings.LastIndex(file, "/")+1:]
+		s, err := o.Stat()
+
+		// write headers needed when allowing client to download file
+		w.Header().Set("Content-Disposition", "attachment; filename="+filename)
+		w.Header().Set("Content-Type", s.ContentType)
+		w.Header().Set("Content-Length", string(s.Size))
+
+		// write file to response
+		_, err = io.Copy(w, o)
+		if err != nil {
+			err = errors.Wrap(err, "writing file to response")
+			web.RespondError(w, r, http.StatusInternalServerError, err)
+			return
+		}
+	}
+}
+
+// Index handles creating word embeddings from a multi-part/file upload and indexing it for search purposes
 func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseWriter, *http.Request, httprouter.Params) {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		teamID := "1" // TODO replace with user auth
+
 		file, header, err := r.FormFile("content")
 		defer file.Close()
 
@@ -59,7 +109,28 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 			return
 		}
 
-		// TODO store the file in block storage so we can download from a search
+		// store the file in block storage so we can download from a search
+		client, err := minio.New(spacesURL, doKey, doSecret, true)
+		if err != nil {
+			err = errors.Wrap(err, "connecting to do spaces")
+			web.RespondError(w, r, http.StatusInternalServerError, err)
+			return
+		}
+
+		opts := minio.PutObjectOptions{
+			UserMetadata: map[string]string{
+				"teamID": "1",
+			},
+		}
+
+		fileName := fmt.Sprintf("%v/%v/%v", teamID, uuid.New().String(), header.Filename)
+		_, err = client.PutObjectWithContext(context.Background(), "stuph", fileName, file, header.Size, opts)
+		if err != nil {
+			err = errors.Wrap(err, "adding object to do spaces")
+			web.RespondError(w, r, http.StatusInternalServerError, err)
+			return
+		}
+		file.Seek(0, 0)
 
 		// pass file to apache tika for parsing to plaintext
 		tikaResp, err := a.TikaParse(file, header.Filename)
@@ -81,7 +152,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 
 		sentences := tokenizer.Tokenize(content)
 		for _, s := range sentences {
-			inputs = append(inputs, s.Text)
+			inputs = append(inputs, strings.ToLower(s.Text))
 		}
 
 		// generate word embeddings from given text
@@ -93,12 +164,12 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 		}
 
 		// create document
-		teamID := "1" // TODO replace with user auth
 		d := &document.Document{
-			Body:   content, // we store the content so we can do full text search with postgres
-			Name:   header.Filename,
-			TypeID: GetDocType(tikaResp.DocumentType),
-			TeamID: teamID,
+			Body:        content, // we store the content so we can do full text search with postgres
+			Name:        header.Filename,
+			TypeID:      GetDocType(tikaResp.DocumentType),
+			DownloadURL: fmt.Sprintf("stuph.%v/%v", spacesURL, fileName),
+			TeamID:      teamID,
 		}
 
 		d, err = ds.CreateDocument(d)
@@ -134,7 +205,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 				return
 			}
 
-			// build context of sentence (include surrounding sentences)
+			// build context of sentence (sentence + surrounding sentences)
 			context := inputs[i]
 			if i != 0 {
 				context = fmt.Sprintf("%v%v", inputs[i-1], context)
@@ -185,7 +256,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 		}
 
 		// build index with N trees, more trees gives higher precision when querying
-		t.Build(10)
+		t.Build(15)
 		if s := t.Save(st.Location); !s {
 			err := errors.Errorf("failed to save index at location %v", st.Location)
 			web.RespondError(w, r, http.StatusInternalServerError, err)
@@ -218,7 +289,7 @@ func (a *App) Search(ds *document.Service, ss *store.Service) func(http.Response
 		}
 
 		// generate word embeddings from given text
-		searchText := []string{b.Text}
+		searchText := []string{strings.ToLower(b.Text)}
 		es, err := embedding.Generate(searchText, a.ServingURL, a.HTTPClient)
 		if err != nil {
 			err = errors.New("cannot generate embeddings from text")
@@ -319,7 +390,7 @@ func (a *App) Search(ds *document.Service, ss *store.Service) func(http.Response
 			docs = append(docs, d)
 		}
 
-		// 3. use 1 - relevancy as rank for fts results
+		// 3. use .8 - relevancy as rank for fts results, this ensures that by default fts results are ranked slightly better than semantic
 		for _, f := range ftsDocs {
 			if _, ok := uniqResults[f.SentenceID.String()]; ok {
 				continue
@@ -327,7 +398,7 @@ func (a *App) Search(ds *document.Service, ss *store.Service) func(http.Response
 				uniqResults[f.SentenceID.String()] = true
 			}
 
-			f.Rank = 1 - f.Rank
+			f.Rank = float32(math.Abs(float64(.8 - f.Rank)))
 			docs = append(docs, f)
 		}
 
@@ -338,10 +409,10 @@ func (a *App) Search(ds *document.Service, ss *store.Service) func(http.Response
 
 		result := struct {
 			Distances []float32               `json:"distances"`
-			Results   []document.SearchResult `json:"results"`
+			Documents []document.SearchResult `json:"documents"`
 		}{
 			Distances: distances,
-			Results:   docs,
+			Documents: docs,
 		}
 
 		web.Respond(w, r, http.StatusOK, result)

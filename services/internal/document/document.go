@@ -44,19 +44,21 @@ type SearchResult struct {
 	SentenceID   uuid.UUID `json:"sentenceID" db:"sentence_id"`
 	AnnoyID      int       `json:"annoyID" db:"annoy_id"`
 	DocumentName string    `json:"name" db:"name"`
+	DownloadURL  string    `json:"downloadURL" db:"download_url"`
 	Text         string    `json:"text" db:"sentence_text"`
 	Rank         float32   `json:"rel" db:"rel"`
 }
 
 // Document represents a document that was indexed
 type Document struct {
-	ID      uuid.UUID `json:"id" db:"document_id"`
-	TypeID  int       `json:"typeID" db:"document_type_id"`
-	Name    string    `json:"name" db:"name"`
-	TeamID  string    `json:"teamID" db:"team_id"` // TODO convert to uuid.UUID when auth is in place
-	Body    string    `json:"body" db:"body"`
-	Created time.Time `json:"created" db:"created"`
-	Updated time.Time `json:"updated" db:"updated"`
+	ID          uuid.UUID `json:"id" db:"document_id"`
+	TypeID      int       `json:"typeID" db:"document_type_id"`
+	TeamID      string    `json:"teamID" db:"team_id"` // TODO convert to uuid.UUID when auth is in place
+	DownloadURL string    `json:"downloadURL" db:"download_url"`
+	Name        string    `json:"name" db:"name"`
+	Body        string    `json:"body" db:"body"`
+	Created     time.Time `json:"created" db:"created"`
+	Updated     time.Time `json:"updated" db:"updated"`
 }
 
 // Sentence represents indexed sentence from a document
@@ -125,11 +127,12 @@ func (s *Service) CreateDocument(d *Document) (*Document, error) {
 	defer stmt.Close()
 
 	args := map[string]interface{}{
-		"id":     uuid.New(),
-		"typeID": d.TypeID,
-		"teamID": d.TeamID,
-		"name":   d.Name,
-		"body":   d.Body,
+		"id":          uuid.New(),
+		"typeID":      d.TypeID,
+		"teamID":      d.TeamID,
+		"name":        d.Name,
+		"body":        d.Body,
+		"downloadURL": d.DownloadURL,
 	}
 
 	var r Document
