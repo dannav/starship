@@ -29,6 +29,7 @@ const Schema = `
 		document_id UUID NOT NULL PRIMARY KEY,
 		document_type_id INT NOT NULL,
 		team_id TEXT NOT NULL,
+		download_url TEXT NOT NULL,
 		name TEXT NOT NULL,
 		body TEXT NOT NULL,
 		created TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),

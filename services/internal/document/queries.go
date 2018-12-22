@@ -2,13 +2,14 @@ package document
 
 const (
 	insertDocument = `
-		INSERT INTO document (document_id, document_type_id, team_id, name, body)
+		INSERT INTO document (document_id, document_type_id, team_id, name, body, download_url)
 		VALUES (
 			:id,
 			:typeID,
 			:teamID,
 			:name,
-			:body
+			:body,
+			:downloadURL
 		) RETURNING *
 	`
 
@@ -46,6 +47,7 @@ const (
 		SELECT
 			d.name AS name,
 			d.document_id AS document_id,
+			d.download_url AS download_url,
 			s.annoy_id AS annoy_id,
 			s.context AS sentence_text,
 			0.0 AS rel,
@@ -56,10 +58,11 @@ const (
 	`
 
 	fullTextSearchSentences = `
-		SELECT document_id, annoy_id, name, context as sentence_text, (rel/(rel+1)) as rel, sentence_id FROM (
+		SELECT document_id, annoy_id, name, context as sentence_text, (rel/(rel+1)) as rel, sentence_id, download_url FROM (
 			SELECT
 				document.document_id as document_id,
 				document.name as name,
+				document.download_url as download_url,
 				context,
 				sentence.annoy_id as annoy_id,
 				to_tsvector(sentence.body) as v,
