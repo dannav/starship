@@ -10,6 +10,14 @@
   version = "v1.1.1"
 
 [[projects]]
+  digest = "1:e47d51dab652d26c3fba6f8cba403f922d02757a82abdc77e90df7948daf296e"
+  name = "github.com/deckarep/golang-set"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "cbaa98ba5575e67703b32b4b19f73c91f3c4159e"
+  version = "v1.7.1"
+
+[[projects]]
   digest = "1:6f9339c912bbdda81302633ad7e99a28dfa5a639c864061f1929510a9a64aa74"
   name = "github.com/dustin/go-humanize"
   packages = ["."]
@@ -80,6 +88,14 @@
   version = "v1.0.0"
 
 [[projects]]
+  digest = "1:b3126a5e167f640c5943eb641489baec30bbbb995a9741b905d7c05239412d4b"
+  name = "github.com/mingrammer/commonregex"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "6565f25cf48f171541d423805a62917ea02f7d65"
+  version = "v1.0.0"
+
+[[projects]]
   digest = "1:ce1c41ebdf4761c8c1336e967b822568534342bf836ad56fee476b102653cec3"
   name = "github.com/minio/minio-go"
   packages = [
@@ -101,6 +117,14 @@
   pruneopts = "UT"
   revision = "ae18d6b8b3205b561c79e8e5f69bff09736185f4"
   version = "v1.0.0"
+
+[[projects]]
+  digest = "1:246ab598a22ea9d50f46e65f655f78161a19822f6597268b02f04af998684807"
+  name = "github.com/montanaflynn/stats"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "1bf9dbcd8cbe1fdb75add3785b1d4a9a646269ab"
+  version = "0.3.0"
 
 [[projects]]
   digest = "1:e5d0bd87abc2781d14e274807a470acd180f0499f8bf5bb18606e9ec22ad9de9"
@@ -214,12 +238,40 @@
   version = "v0.3.0"
 
 [[projects]]
-  digest = "1:4fbfbdb2b5903fcda1c95101f38c95ebd2d75f324e6c842df614e2ceb9d9506a"
+  branch = "master"
+  digest = "1:c12e7200a4cb6bbacbbcee75cdea983082c47d397b21102bec2243e35fce734c"
+  name = "gonum.org/v1/gonum"
+  packages = [
+    "blas",
+    "blas/blas64",
+    "blas/gonum",
+    "floats",
+    "internal/asm/c128",
+    "internal/asm/f32",
+    "internal/asm/f64",
+    "internal/math32",
+    "lapack",
+    "lapack/gonum",
+    "lapack/lapack64",
+    "mat",
+  ]
+  pruneopts = "UT"
+  revision = "16380329fcd8f07227b82c1c92cadea7a1bef000"
+
+[[projects]]
+  branch = "v2"
+  digest = "1:ff398a1169e0ad11c0537c341fcbc9b4be7e34143886b34352ff1005d45b3ab4"
+  name = "gopkg.in/jdkato/prose.v2"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "767a23049b9e59ef675496a9406a1e456bc5ad6e"
+
+[[projects]]
+  digest = "1:85b60f4403e2aae0eee2ac2ba50e4124dea766b582c6ec0d94fb1335d9c0d16e"
   name = "gopkg.in/neurosnap/sentences.v1"
   packages = [
     ".",
     "data",
-    "english",
   ]
   pruneopts = "UT"
   revision = "a7f18ead1433a139742a8b42ce7a059cfb484d60"
@@ -230,6 +282,7 @@
   analyzer-version = 1
   input-imports = [
     "github.com/google/go-tika/tika",
+    "github.com/google/uuid",
     "github.com/jmoiron/sqlx",
     "github.com/julienschmidt/httprouter",
     "github.com/lib/pq",
@@ -240,7 +293,7 @@
     "github.com/stretchr/testify/assert",
     "github.com/stretchr/testify/suite",
     "github.com/writeas/go-strip-markdown",
-    "gopkg.in/neurosnap/sentences.v1/english",
+    "gopkg.in/jdkato/prose.v2",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1

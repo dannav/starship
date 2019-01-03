@@ -3,8 +3,8 @@ package output
 // text templates
 const (
 	search = `
-{{print "Document: \033[1;33m"}}{{.DocumentID}}{{print "\033[0m"}}
 {{print "Name:     \033[1;36m"}}{{.DocumentName}}{{print "\033[0m" }}
+{{print "Path:     \033[1;33m"}}{{.Path}}{{print "\033[0m" }}
 
 {{.Text}}
 

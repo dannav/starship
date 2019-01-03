@@ -19,6 +19,7 @@ import (
 	pb "gopkg.in/cheggaaa/pb.v1"
 )
 
+// Add timeout of 30secs on web requests
 var client = &http.Client{
 	Timeout: time.Second * 30,
 }
@@ -26,10 +27,14 @@ var client = &http.Client{
 func main() {
 	var cmd string
 	var args []string
+
+	// flags
 	var showHelp bool
+	var indexPath string
 
 	flag.BoolVar(&showHelp, "h", false, "show help text")
 	flag.BoolVar(&showHelp, "help", false, "show help text")
+	flag.StringVar(&indexPath, "p", "/", "path to store document in index")
 	flag.Parse()
 
 	// if help flags passed show help and exit
@@ -83,14 +88,20 @@ func main() {
 			return
 		}
 
+		fmt.Printf("\n Uploading %v\n", filePath)
+
 		// start progress bar for upload - proxy is used to increment progress bar
 		fileSize := int(fi.Size())
 		bar := pb.New(fileSize).SetUnits(pb.U_BYTES)
 		proxyReader := bar.NewProxyReader(f)
 
+		// render progress bar
+		bar.SetMaxWidth(80)
+		bar.Start()
+
 		// index the file in search engine
 		e := engine.NewEngine(client)
-		err = e.Index(proxyReader, filepath.Base(filePath))
+		err = e.Index(bar, proxyReader, filepath.Base(filePath), indexPath)
 		if err != nil {
 			log.Error(err.Error())
 			return
@@ -131,10 +142,28 @@ func main() {
 			// trim leading whitespace from search result text
 			searchResults.Documents[i].Text = strings.TrimSpace(searchResults.Documents[i].Text)
 
+			// add new line after words around 75 chars to keep terminal output from being too long
+			var text string
+			words := strings.Fields(searchResults.Documents[i].Text)
+			letterCount := 0
+			for _, w := range words {
+				letterCount = letterCount + len(w)
+
+				if letterCount-75 >= 0 {
+					text = text + "\n"
+					letterCount = 0
+				}
+
+				text = text + " " + w
+			}
+			searchResults.Documents[i].Text = text
+
+			// write search result template
 			o := output.NewTemplate(output.SearchType, searchResults.Documents[i])
 			err = o.Write()
 			if err != nil {
 				log.Error(err.Error())
+				tb.Close()
 				return
 			}
 
@@ -182,7 +211,7 @@ func main() {
 
 			download:
 				// start a spinner on a new line while we download the file
-				fmt.Printf("\n")
+				fmt.Print("\n")
 				s := spinner.New(spinner.CharSets[24], 100*time.Millisecond)
 				s.Prefix = "Downloading... "
 				s.Start()
@@ -190,6 +219,7 @@ func main() {
 				err = e.DownloadFile(searchResults.Documents[i].DownloadURL)
 				if err != nil {
 					log.Error(err.Error())
+					tb.Close()
 					return
 				}
 				s.Stop()

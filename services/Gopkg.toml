@@ -58,9 +58,9 @@
   unused-packages = true
 
 [[constraint]]
-  name = "gopkg.in/neurosnap/sentences.v1"
-  version = "1.0.6"
-
-[[constraint]]
   name = "github.com/minio/minio-go"
   version = "6.0.11"
+
+[[constraint]]
+  branch = "v2"
+  name = "gopkg.in/jdkato/prose.v2"

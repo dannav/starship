@@ -8,6 +8,18 @@ import (
 
 // Schema represents the database schema
 const Schema = `
+	CREATE EXTENSION IF NOT EXISTS ltree;
+
+	CREATE TABLE IF NOT EXISTS folder (
+		folder_id UUID NOT NULL PRIMARY KEY,
+		team_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+		path ltree,
+		created TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+		updated TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+		CONSTRAINT uniq_path UNIQUE (path, team_id)
+	);
+
 	CREATE TABLE IF NOT EXISTS store (
 		store_id UUID NOT NULL PRIMARY KEY,
 		team_id TEXT NOT NULL,
@@ -28,13 +40,16 @@ const Schema = `
 	CREATE TABLE IF NOT EXISTS document (
 		document_id UUID NOT NULL PRIMARY KEY,
 		document_type_id INT NOT NULL,
+		folder_id UUID NOT NULL,
 		team_id TEXT NOT NULL,
 		download_url TEXT NOT NULL,
+		path TEXT NOT NULL,
 		name TEXT NOT NULL,
 		body TEXT NOT NULL,
 		created TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
 		updated TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
-		FOREIGN KEY (document_type_id) REFERENCES document_type (document_type_id)
+		FOREIGN KEY (document_type_id) REFERENCES document_type (document_type_id),
+		FOREIGN KEY (folder_id) REFERENCES folder (folder_id)
 	);
 
 	CREATE TABLE IF NOT EXISTS sentence (
@@ -47,7 +62,7 @@ const Schema = `
 		embedding JSON NOT NULL,
 		created TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
 		updated TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
-		FOREIGN KEY (document_id) REFERENCES document (document_id),
+		FOREIGN KEY (document_id) REFERENCES document (document_id) ON DELETE CASCADE,
 		FOREIGN KEY (store_id) REFERENCES store (store_id)
 	);
 `
@@ -59,6 +74,10 @@ const Indexes = `
 	CREATE INDEX IF NOT EXISTS sentence_docid ON sentence (document_id);
 
 	CREATE INDEX IF NOT EXISTS document_teamid ON document (team_id);
+
+	CREATE INDEX IF NOT EXISTS document_path ON document (path);
+
+	CREATE INDEX IF NOT EXISTS folder_path_idx ON FOLDER USING GIST (path);
 
 	CREATE OR REPLACE FUNCTION gin_fts_fct(body text)
 		RETURNS tsvector

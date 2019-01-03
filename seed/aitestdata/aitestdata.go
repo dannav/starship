@@ -203,7 +203,7 @@ func main() {
 	}
 
 	for _, r := range readmes {
-		err := Index(strings.NewReader(r.Content), fmt.Sprintf("%v/%v", r.Repo, "README.md"))
+		err := Index(strings.NewReader(r.Content), r.Repo)
 		if err != nil {
 			log.Print(err)
 			log.Print("error indexing README " + r.Repo)
@@ -238,10 +238,11 @@ func HandleRateLimit(resp *github.Response) {
 }
 
 // Index indexes a readme file with the searchd api
-func Index(file io.Reader, filename string) error {
+func Index(file io.Reader, path string) error {
+	// add multipart form fields
 	var buf bytes.Buffer
 	encoder := multipart.NewWriter(&buf)
-	field, err := encoder.CreateFormFile("content", filename)
+	field, err := encoder.CreateFormFile("content", "README.md")
 	if err != nil {
 		err = errors.Wrap(err, "creating content form field for searchd request")
 		return err
@@ -252,8 +253,21 @@ func Index(file io.Reader, filename string) error {
 		err = errors.Wrap(err, "copying file to searchd request")
 		return err
 	}
+
+	pathField, err := encoder.CreateFormField("path")
+	if err != nil {
+		err = errors.Wrap(err, "creating path form field for index request")
+		return err
+	}
+
+	_, err = pathField.Write([]byte(path))
+	if err != nil {
+		err = errors.Wrap(err, "writing index path to index request")
+		return err
+	}
 	encoder.Close()
 
+	// perform index request
 	endpoint := "http://localhost:8080/v1/index"
 	req, err := http.NewRequest(http.MethodPost, endpoint, &buf)
 	if err != nil {

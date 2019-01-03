@@ -18,14 +18,6 @@
   version = "v1.7.0"
 
 [[projects]]
-  digest = "1:236d7e1bdb50d8f68559af37dbcf9d142d56b431c9b2176d41e2a009b664cda8"
-  name = "github.com/google/uuid"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "9b3b1e0f5f99ae461456d768e7d301a7acdaa2d8"
-  version = "v1.1.0"
-
-[[projects]]
   digest = "1:c658e84ad3916da105a761660dcaeb01e63416c8ec7bc62256a9b411a05fcd67"
   name = "github.com/mattn/go-colorable"
   packages = ["."]
@@ -87,7 +79,6 @@
   input-imports = [
     "github.com/briandowns/spinner",
     "github.com/fatih/color",
-    "github.com/google/uuid",
     "github.com/nsf/termbox-go",
     "github.com/pkg/errors",
     "gopkg.in/cheggaaa/pb.v1",

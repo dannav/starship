@@ -1,15 +1,39 @@
 package document
 
 const (
+	deleteFolder = `DELETE FROM folder WHERE folder_id = :id`
+
+	insertFolder = `
+		INSERT INTO folder (folder_id, team_id, name, path)
+		VALUES (
+			:id,
+			:teamID,
+			:name,
+			:path
+		) ON CONFLICT DO NOTHING
+	`
+
+	getFolderByPath = `
+			SELECT * FROM folder WHERE path = :path AND team_id = :teamID
+	`
+
+	deleteDocumentByPath = `DELETE FROM document WHERE path = :path`
+
+	getDocumentByPath = `
+		SELECT * FROM document WHERE path = :path
+	`
+
 	insertDocument = `
-		INSERT INTO document (document_id, document_type_id, team_id, name, body, download_url)
+		INSERT INTO document (document_id, document_type_id, team_id, name, body, download_url, folder_id, path)
 		VALUES (
 			:id,
 			:typeID,
 			:teamID,
 			:name,
 			:body,
-			:downloadURL
+			:downloadURL,
+			:folderID,
+			:path
 		) RETURNING *
 	`
 
@@ -48,6 +72,7 @@ const (
 			d.name AS name,
 			d.document_id AS document_id,
 			d.download_url AS download_url,
+			d.path AS path,
 			s.annoy_id AS annoy_id,
 			s.context AS sentence_text,
 			0.0 AS rel,
@@ -58,20 +83,21 @@ const (
 	`
 
 	fullTextSearchSentences = `
-		SELECT document_id, annoy_id, name, context as sentence_text, (rel/(rel+1)) as rel, sentence_id, download_url FROM (
+		SELECT document_id, annoy_id, name, context as sentence_text, (rel/(rel+1)) as rel, sentence_id, download_url, "path" as "path" FROM (
 			SELECT
 				document.document_id as document_id,
 				document.name as name,
 				document.download_url as download_url,
+				document.path as "path",
 				context,
 				sentence.annoy_id as annoy_id,
 				to_tsvector(sentence.body) as v,
-				ts_rank(to_tsvector(sentence.body), plainto_tsquery(:text)) as rel,
+				ts_rank(to_tsvector(sentence.body), plainto_tsquery(:search)) as rel,
 				sentence.sentence_id as sentence_id
 			FROM sentence
 			INNER JOIN document ON sentence.document_id = document.document_id
 		) search
-		WHERE search.v @@ plainto_tsquery(:text)
+		WHERE search.v @@ plainto_tsquery(:search)
 		ORDER BY rel DESC LIMIT 20;
 	`
 )

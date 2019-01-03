@@ -2,7 +2,11 @@ package document
 
 import (
 	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
@@ -20,6 +24,9 @@ const (
 
 	// codeDuplicateInsert is the code pg throws on a duplicate insert for a unique constraint
 	codeDuplicateInsert = pq.ErrorCode("23505")
+
+	// reservedFolderName is a reserved name for the root folder
+	reservedFolderName = "_rootfolder_"
 )
 
 var (
@@ -44,17 +51,30 @@ type SearchResult struct {
 	SentenceID   uuid.UUID `json:"sentenceID" db:"sentence_id"`
 	AnnoyID      int       `json:"annoyID" db:"annoy_id"`
 	DocumentName string    `json:"name" db:"name"`
+	Path         string    `json:"path" db:"path"`
 	DownloadURL  string    `json:"downloadURL" db:"download_url"`
 	Text         string    `json:"text" db:"sentence_text"`
 	Rank         float32   `json:"rel" db:"rel"`
 }
 
+// Folder represents a folder
+type Folder struct {
+	FolderID uuid.UUID `json:"id" db:"folder_id"`
+	TeamID   string    `json:"teamID" db:"team_id"` // TODO convert to uuid.UUID when auth is in place
+	Name     string    `json:"name" db:"name"`
+	Path     string    `json:"path" db:"path"`
+	Created  time.Time `json:"created" db:"created"`
+	Updated  time.Time `json:"updated" db:"updated"`
+}
+
 // Document represents a document that was indexed
 type Document struct {
 	ID          uuid.UUID `json:"id" db:"document_id"`
+	FolderID    uuid.UUID `json:"folderID" db:"folder_id"`
 	TypeID      int       `json:"typeID" db:"document_type_id"`
 	TeamID      string    `json:"teamID" db:"team_id"` // TODO convert to uuid.UUID when auth is in place
 	DownloadURL string    `json:"downloadURL" db:"download_url"`
+	Path        string    `json:"path" db:"path"`
 	Name        string    `json:"name" db:"name"`
 	Body        string    `json:"body" db:"body"`
 	Created     time.Time `json:"created" db:"created"`
@@ -118,6 +138,186 @@ func (s *Service) GetIndexContentForTeam(teamID string) ([]Sentence, error) {
 	return r, nil
 }
 
+// cleanPath removes all whitespace and hyphens from ltree paths
+func cleanPath(path string) string {
+	path = strings.Replace(path, ".", "_", -1) // replace '.' with '_'
+	path = strings.Replace(path, "/", ".", -1) // replace '/' with path delimeter '.'
+
+	cleaned := strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) || r == '-' {
+			return -1
+		}
+
+		return r
+	}, path)
+
+	return cleaned
+}
+
+// GetFolderByPath gets a folder given a specific path
+func (s *Service) GetFolderByPath(path string) (*Folder, error) {
+	stmt, err := s.DB.PrepareNamed(getFolderByPath)
+	if err != nil {
+		return nil, errors.Wrap(err, "preparing get folder by path query")
+	}
+	defer stmt.Close()
+
+	args := map[string]interface{}{
+		"path":   cleanPath(path),
+		"teamID": "1",
+	}
+
+	var r Folder
+	if err := stmt.Get(&r, args); err != nil {
+		return nil, errors.Wrap(err, "get folder by path query")
+	}
+
+	return &r, nil
+}
+
+// CreateFolderPath creates the folder a document is placed in if it does not exist.
+// Parameter 'recursing' should be false when calling this method
+func (s *Service) CreateFolderPath(path string, recursing bool) (string, error) {
+	stmt, err := s.DB.PrepareNamed(insertFolder)
+	if err != nil {
+		return "", errors.Wrap(err, "preparing insert folder query")
+	}
+	defer stmt.Close()
+
+	// get last "/" to decipher folder name
+	slashIndex := strings.LastIndex(path, "/")
+
+	// get folder name
+	var name string
+	if path == "/" {
+		name = reservedFolderName
+	}
+
+	if (len(path) >= slashIndex+1) && name != reservedFolderName {
+		name = path[slashIndex+1:]
+	} else {
+		name = reservedFolderName
+	}
+
+	// ensure that path is always set after root folder
+	if path == "/" {
+		path = reservedFolderName
+	} else {
+		if !recursing {
+			path = fmt.Sprintf("%v/%v", reservedFolderName, path)
+		}
+	}
+
+	folderID := uuid.New()
+	args := map[string]interface{}{
+		"id":     folderID,
+		"teamID": "1",
+		"name":   name,
+		"path":   cleanPath(path),
+	}
+
+	// insert does not error on duplicates, check rows affected to check if we need to get the folder_id
+	r, err := stmt.Exec(args)
+	if err != nil {
+		return "", errors.Wrap(err, "insert folder query")
+	}
+
+	a, err := r.RowsAffected()
+	if err != nil {
+		return "", errors.Wrap(err, "getting rows affected")
+	}
+
+	// get folder since insert returned nothing
+	if a == 0 {
+		f, err := s.GetFolderByPath(path)
+		if err != nil {
+			return "", errors.Wrap(err, "get folder by path")
+		}
+
+		folderID = f.FolderID.String()
+		path = f.Path
+	}
+
+	// go up the path tree and create parent folders if we have a nested path
+	parentPath := path
+
+	// skip if we are at root folder path (reservedFolderName)
+	if parentPath != reservedFolderName {
+		parentFolders := strings.Split(path, "/")
+
+		for i := 0; i < len(parentFolders); i++ {
+			// get one folder up
+			slashIndex := strings.LastIndex(parentPath, "/")
+			if slashIndex > -1 {
+				parentPath = parentPath[:slashIndex]
+			} else {
+				parentPath = "/" // if we don't have anymore slashes set to root
+			}
+
+			_, err := s.CreateFolderPath(parentPath, true)
+			if err != nil {
+				return "", errors.Wrapf(err, "creating parent paths, err on path %v", parentPath)
+			}
+		}
+	}
+
+	return folderID, nil
+}
+
+// DeleteDocument deletes a document and all referencing data
+func (s *Service) DeleteDocument(path string) error {
+	stmt, err := s.DB.PrepareNamed(deleteDocumentByPath)
+	if err != nil {
+		return errors.Wrap(err, "preparing delete document by path query")
+	}
+	defer stmt.Close()
+
+	args := map[string]interface{}{
+		"path": cleanPath(path),
+	}
+
+	// sentence table has on delete cascade foreign key so all previous sentences will be removed
+	if _, err := stmt.Exec(args); err != nil {
+		return errors.Wrap(err, "error deleting document")
+	}
+
+	return nil
+}
+
+// GetDocumentByPath gets a document given a specific path
+func (s *Service) GetDocumentByPath(path string) (*Document, error) {
+	stmt, err := s.DB.PrepareNamed(getDocumentByPath)
+	if err != nil {
+		return nil, errors.Wrap(err, "preparing get document by path query")
+	}
+	defer stmt.Close()
+
+	// ensure a file is set in the path
+	filename := filepath.Base(path)
+	if filename == "." {
+		err := errors.New("a file was not defined in the given path")
+		return nil, err
+	}
+
+	// ensure that reservedFolderName is set in the path
+	if strings.Index(path, reservedFolderName) == -1 {
+		path = fmt.Sprintf("%v/%v", reservedFolderName, path)
+	}
+
+	// remove filename from path because we don't want to clean it
+	path = strings.Replace(path, filename, "", 1)
+	args := map[string]interface{}{
+		"path": cleanPath(path) + filename,
+	}
+
+	var r Document
+	if err := stmt.Get(&r, args); err != nil {
+		return nil, errors.Wrap(err, "get document by path query")
+	}
+
+	return &r, nil
+}
+
 // CreateDocument creates a new document
 func (s *Service) CreateDocument(d *Document) (*Document, error) {
 	stmt, err := s.DB.PrepareNamed(insertDocument)
@@ -126,13 +326,22 @@ func (s *Service) CreateDocument(d *Document) (*Document, error) {
 	}
 	defer stmt.Close()
 
+	// create folder given path, get folder_id and insert doc with it
+	folderID, err := s.CreateFolderPath(d.Path, false)
+	if err != nil {
+		return nil, errors.Wrap(err, "creating folder for document")
+	}
+
+	path := fmt.Sprintf("%v/%v", reservedFolderName, d.Path)
 	args := map[string]interface{}{
 		"id":          uuid.New(),
 		"typeID":      d.TypeID,
 		"teamID":      d.TeamID,
 		"name":        d.Name,
 		"body":        d.Body,
+		"path":        cleanPath(path) + "." + d.Name,
 		"downloadURL": d.DownloadURL,
+		"folderID":    folderID,
 	}
 
 	var r Document
@@ -200,7 +409,7 @@ func (s *Service) FullTextSearch(text string) ([]SearchResult, error) {
 	defer stmt.Close()
 
 	args := map[string]interface{}{
-		"text": text,
+		"search": text,
 	}
 
 	var r []SearchResult

@@ -14,6 +14,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// Digital Ocean Spaces info
+var doKey = "E7GJPSBYFMF5SJU7P4TC"
+var doSecret = "N/K398tqDdLak67JrXYMzYEW/a1juFhC3rSxVuC5s5M"
+var spacesURL = "sfo2.digitaloceanspaces.com"
+
 // Cfg represents the app config
 type Cfg struct {
 	ServingURL string
@@ -77,6 +82,7 @@ func (a *App) initHandler() {
 	r.Handle(http.MethodPost, "/v1/index", a.Index(ds, ss))
 	r.Handle(http.MethodGet, "/v1/search", a.Search(ds, ss))
 	r.Handle(http.MethodGet, "/v1/download", a.DownloadFile())
+	r.Handle(http.MethodGet, "/v1/exists", a.CheckFileExistence(ds))
 
 	// wrap all the routes with global middleware
 	a.handler = web.RequestMW(r)

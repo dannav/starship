@@ -9,8 +9,11 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
-	"github.com/google/uuid"
+	pb "gopkg.in/cheggaaa/pb.v1"
+
+	"github.com/briandowns/spinner"
 	"github.com/pkg/errors"
 )
 
@@ -31,13 +34,11 @@ type SearchResponse struct {
 
 // SearchResult represents search results
 type SearchResult struct {
-	DocumentID   uuid.UUID `json:"id"`
-	SentenceID   uuid.UUID `json:"sentenceID"`
-	AnnoyID      int       `json:"annoyID"`
-	DocumentName string    `json:"name"`
-	DownloadURL  string    `json:"downloadURL"`
-	Text         string    `json:"text"`
-	Rank         float32   `json:"rel"`
+	Path         string  `json:"path"`
+	DocumentName string  `json:"name"`
+	DownloadURL  string  `json:"downloadURL"`
+	Text         string  `json:"text"`
+	Rank         float32 `json:"rel"`
 }
 
 // Response is the format used for all api responses
@@ -155,10 +156,22 @@ func (e *Engine) Search(text string) (*SearchResponse, error) {
 }
 
 // Index stores and indexes a file with the API
-func (e *Engine) Index(file io.Reader, filename string) error {
+func (e *Engine) Index(bar *pb.ProgressBar, file io.Reader, filename, indexPath string) error {
 	var buf bytes.Buffer
-
 	encoder := multipart.NewWriter(&buf)
+
+	pathField, err := encoder.CreateFormField("path")
+	if err != nil {
+		err = errors.Wrap(err, "creating path form field for index request")
+		return err
+	}
+
+	_, err = pathField.Write([]byte(indexPath))
+	if err != nil {
+		err = errors.Wrap(err, "writing index path to index request")
+		return err
+	}
+
 	field, err := encoder.CreateFormFile("content", filename)
 	if err != nil {
 		err = errors.Wrap(err, "creating content form field for index request")
@@ -170,7 +183,14 @@ func (e *Engine) Index(file io.Reader, filename string) error {
 		err = errors.Wrap(err, "copying file to index request")
 		return err
 	}
+
 	encoder.Close()
+	bar.Finish()
+
+	// start a spinner while api performs indexing
+	s := spinner.New(spinner.CharSets[24], 100*time.Millisecond)
+	s.Prefix = " Indexing content... "
+	s.Start()
 
 	endpoint := fmt.Sprintf("%v/v1/index", e.APIEndpoint)
 	req, err := http.NewRequest(http.MethodPost, endpoint, &buf)
@@ -190,6 +210,8 @@ func (e *Engine) Index(file io.Reader, filename string) error {
 		err = errors.New("index request failed")
 		return err
 	}
+
+	s.Stop()
 
 	return nil
 }

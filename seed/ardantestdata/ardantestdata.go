@@ -46,7 +46,9 @@ func main() {
 			log.Fatal(err)
 		}
 
-		err = Index(f, filepath.Base(file))
+		// remove filename from path
+		path := strings.Replace(file, filepath.Base(file), "", 1)
+		err = Index(f, filepath.Base(file), path)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -54,7 +56,7 @@ func main() {
 }
 
 // Index indexes a readme file with the searchd api
-func Index(file io.Reader, filename string) error {
+func Index(file io.Reader, filename, path string) error {
 	var buf bytes.Buffer
 	encoder := multipart.NewWriter(&buf)
 	field, err := encoder.CreateFormFile("content", filename)
@@ -66,6 +68,18 @@ func Index(file io.Reader, filename string) error {
 	_, err = io.Copy(field, file)
 	if err != nil {
 		err = errors.Wrap(err, "copying file to searchd request")
+		return err
+	}
+
+	pathField, err := encoder.CreateFormField("path")
+	if err != nil {
+		err = errors.Wrap(err, "creating path form field for index request")
+		return err
+	}
+
+	_, err = pathField.Write([]byte(path))
+	if err != nil {
+		err = errors.Wrap(err, "writing index path to index request")
 		return err
 	}
 	encoder.Close()

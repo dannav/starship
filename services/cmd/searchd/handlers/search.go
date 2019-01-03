@@ -10,6 +10,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -31,7 +33,7 @@ import (
 	"github.com/dannav/starship/services/internal/store"
 	"github.com/julienschmidt/httprouter"
 	"github.com/pkg/errors"
-	"gopkg.in/neurosnap/sentences.v1/english"
+	prose "gopkg.in/jdkato/prose.v2"
 )
 
 // vDims represents how many dimensions a spotify/annoy index vector is (sized returned by tensorflow model)
@@ -43,11 +45,6 @@ var MimeToDocType = map[string]int{
 	"application/pdf": document.TypePDF,
 }
 
-// Digital Ocean Spaces info
-var doKey = "E7GJPSBYFMF5SJU7P4TC"
-var doSecret = "N/K398tqDdLak67JrXYMzYEW/a1juFhC3rSxVuC5s5M"
-var spacesURL = "sfo2.digitaloceanspaces.com"
-
 // GetDocType gets the document type from a mimeType
 func GetDocType(s string) int {
 	if _, ok := MimeToDocType[s]; !ok {
@@ -55,44 +52,6 @@ func GetDocType(s string) int {
 	}
 
 	return MimeToDocType[s]
-}
-
-// DownloadFile handles downloading a file from blob storage
-func (a *App) DownloadFile() func(http.ResponseWriter, *http.Request, httprouter.Params) {
-	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		file := r.URL.Query().Get("file")
-		client, err := minio.New(spacesURL, doKey, doSecret, true)
-		if err != nil {
-			err = errors.Wrap(err, "connecting to do spaces")
-			web.RespondError(w, r, http.StatusInternalServerError, err)
-			return
-		}
-
-		opts := minio.GetObjectOptions{}
-		o, err := client.GetObject("stuph", file, opts)
-		if err != nil {
-			err = errors.Wrap(err, "downloading file")
-			web.RespondError(w, r, http.StatusInternalServerError, err)
-			return
-		}
-
-		// get filename by copying everything after last "/" in path
-		filename := file[strings.LastIndex(file, "/")+1:]
-		s, err := o.Stat()
-
-		// write headers needed when allowing client to download file
-		w.Header().Set("Content-Disposition", "attachment; filename="+filename)
-		w.Header().Set("Content-Type", s.ContentType)
-		w.Header().Set("Content-Length", string(s.Size))
-
-		// write file to response
-		_, err = io.Copy(w, o)
-		if err != nil {
-			err = errors.Wrap(err, "writing file to response")
-			web.RespondError(w, r, http.StatusInternalServerError, err)
-			return
-		}
-	}
 }
 
 // Index handles creating word embeddings from a multi-part/file upload and indexing it for search purposes
@@ -109,28 +68,37 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 			return
 		}
 
-		// store the file in block storage so we can download from a search
-		client, err := minio.New(spacesURL, doKey, doSecret, true)
-		if err != nil {
-			err = errors.Wrap(err, "connecting to do spaces")
-			web.RespondError(w, r, http.StatusInternalServerError, err)
-			return
+		path := r.FormValue("path")
+		if path == "" {
+			path = "/"
 		}
 
-		opts := minio.PutObjectOptions{
-			UserMetadata: map[string]string{
-				"teamID": "1",
-			},
+		// if path is multiple dirs remove any possible trailing or repeating '/'
+	cleanpath:
+		if path != "/" {
+			for i := range path {
+				runeArr := []rune(path)
+				ch := runeArr[i]
+
+				if ch == '/' && i == len(path)-1 {
+					path = path[:i] + path[i+1:]
+					goto cleanpath
+				}
+
+				if ch == '/' && len(path) >= i+1 {
+					if ch := runeArr[i+1]; ch == '/' {
+						path = path[:i] + path[i+1:]
+						goto cleanpath
+					}
+				}
+			}
 		}
 
-		fileName := fmt.Sprintf("%v/%v/%v", teamID, uuid.New().String(), header.Filename)
-		_, err = client.PutObjectWithContext(context.Background(), "stuph", fileName, file, header.Size, opts)
-		if err != nil {
-			err = errors.Wrap(err, "adding object to do spaces")
-			web.RespondError(w, r, http.StatusInternalServerError, err)
-			return
+		// if first char is '/' and have multiple dirs remove leading '/'
+		if len(path) > 1 && path[0] == '/' {
+			path = strings.Replace(path, "/", "", 1)
 		}
-		file.Seek(0, 0)
+		// end cleanup
 
 		// pass file to apache tika for parsing to plaintext
 		tikaResp, err := a.TikaParse(file, header.Filename)
@@ -141,18 +109,39 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 		}
 		content := tikaResp.Body
 
-		// break up text into sentences
-		var inputs []string
-		tokenizer, err := english.NewSentenceTokenizer(nil)
+		// create regex for non alphanumeric chars, ignore symbols commonly found in text
+		reg, err := regexp.Compile(`[^a-zA-Z0-9\s\.!?:;"'\$@&]+`)
 		if err != nil {
-			err = errors.Wrap(err, "tokenizing text to sentences")
+			err = errors.Wrap(err, "non alpha regex")
 			web.RespondError(w, r, http.StatusInternalServerError, err)
 			return
 		}
 
-		sentences := tokenizer.Tokenize(content)
-		for _, s := range sentences {
-			inputs = append(inputs, strings.ToLower(s.Text))
+		// create regex for new lines on all systems \r is to catch newlines on windows
+		regNewLines, err := regexp.Compile(`\r?\n`)
+		if err != nil {
+			err = errors.Wrap(err, "newline regex")
+			web.RespondError(w, r, http.StatusInternalServerError, err)
+			return
+		}
+
+		// convert tika content resp to a prose document
+		doc, err := prose.NewDocument(content)
+		if err != nil {
+			err = errors.Wrap(err, "tokenizing text")
+			web.RespondError(w, r, http.StatusInternalServerError, err)
+			return
+		}
+
+		// inputs will be sent to the sentence encoder, where uncleaned is stored for search result purposes
+		var inputs []string
+		var uncleaned []string
+
+		sents := doc.Sentences()
+		for _, s := range sents {
+			// remove non alpha numeric chars from sentence text
+			inputs = append(inputs, reg.ReplaceAllString(s.Text, ""))
+			uncleaned = append(uncleaned, regNewLines.ReplaceAllString(s.Text, " "))
 		}
 
 		// generate word embeddings from given text
@@ -163,18 +152,65 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 			return
 		}
 
-		// create document
+		// prepare a client to connect to block storage (do spaces)
+		client, err := minio.New(spacesURL, doKey, doSecret, true)
+		if err != nil {
+			err = errors.Wrap(err, "connecting to do spaces")
+			web.RespondError(w, r, http.StatusInternalServerError, err)
+			return
+		}
+
+		// prepare to create a document
+		cdnFilename := fmt.Sprintf("%v/%v/%v", teamID, uuid.New().String(), header.Filename)
 		d := &document.Document{
 			Body:        content, // we store the content so we can do full text search with postgres
 			Name:        header.Filename,
 			TypeID:      GetDocType(tikaResp.DocumentType),
-			DownloadURL: fmt.Sprintf("stuph.%v/%v", spacesURL, fileName),
+			DownloadURL: fmt.Sprintf("stuph.%v/%v", spacesURL, cdnFilename),
+			Path:        path,
 			TeamID:      teamID,
 		}
 
+		// check if a document at this path exists and delete it so we can update indexes if it does
+		pDoc, err := ds.GetDocumentByPath(d.Path)
+		if err != nil {
+			if err := errors.Cause(err); err != sql.ErrNoRows {
+				err = errors.Wrap(err, "get document by path")
+				web.RespondError(w, r, http.StatusInternalServerError, err)
+				return
+			}
+		}
+
+		if pDoc != nil {
+			err := ds.DeleteDocument(d.Path)
+			if err != nil {
+				err = errors.Wrap(err, "delete document")
+				web.RespondError(w, r, http.StatusInternalServerError, err)
+				return
+			}
+
+			// TODO :- delete from digital ocean spaces
+		}
+
+		// create document
 		d, err = ds.CreateDocument(d)
 		if err != nil {
 			err = errors.Wrap(err, "create document")
+			web.RespondError(w, r, http.StatusInternalServerError, err)
+			return
+		}
+
+		// store the file in block storage so we can download from a search
+		opts := minio.PutObjectOptions{
+			UserMetadata: map[string]string{
+				"teamID": "1",
+			},
+		}
+
+		file.Seek(0, 0)
+		_, err = client.PutObjectWithContext(context.Background(), "stuph", cdnFilename, file, header.Size, opts)
+		if err != nil {
+			err = errors.Wrap(err, "adding object to do spaces")
 			web.RespondError(w, r, http.StatusInternalServerError, err)
 			return
 		}
@@ -206,17 +242,17 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 			}
 
 			// build context of sentence (sentence + surrounding sentences)
-			context := inputs[i]
+			context := uncleaned[i]
 			if i != 0 {
-				context = fmt.Sprintf("%v%v", inputs[i-1], context)
+				context = fmt.Sprintf("%v %v", uncleaned[i-1], context)
 			}
 
-			if len(inputs) > i+1 {
-				context = fmt.Sprintf("%v%v", context, inputs[i+1])
+			if len(uncleaned) > i+1 {
+				context = fmt.Sprintf("%v %v", context, uncleaned[i+1])
 			}
 
 			sen := &document.Sentence{
-				Body:       inputs[i],
+				Body:       uncleaned[i],
 				Context:    context,
 				DocumentID: d.ID,
 				StoreID:    st.ID,
@@ -269,6 +305,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 }
 
 // Search performs a search on all documents with the given text
+// TODO :- add filtering by path which requires storing each path in a new annoy index store (so we can query all documents in a path)
 func (a *App) Search(ds *document.Service, ss *store.Service) func(http.ResponseWriter, *http.Request, httprouter.Params) {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 		var b struct {
@@ -364,7 +401,7 @@ func (a *App) Search(ds *document.Service, ss *store.Service) func(http.Response
 			return
 		}
 
-		// Ranking System Process (TODO run tests and tweak this for best results)
+		// Ranking System Process (TODO :- run tests and tweak this for best results)
 		// =======================================================================
 
 		// 1. Start with distance from searchtext for annoy search results (set above when creating docsSorted)
