@@ -56,6 +56,20 @@ func main() {
 	// cli main logic
 	switch cmd {
 	case "help":
+		var subcommand string
+		if len(args) > 0 {
+			subcommand = args[0]
+		}
+
+		switch subcommand {
+		case "index":
+			help.ShowIndex()
+			return
+		case "search":
+			help.ShowSearch()
+			return
+		}
+
 		help.ShowHelp()
 		return
 	case "index":
@@ -63,6 +77,11 @@ func main() {
 		if len(args) == 0 {
 			log.Error(uerrors.IndexPathNotProvided)
 			return
+		}
+
+		// format index path
+		if indexPath[0] != '/' {
+			indexPath = "/"
 		}
 
 		// index file passed in argument
@@ -88,6 +107,40 @@ func main() {
 			return
 		}
 
+		e := engine.NewEngine(client)
+
+		// create valid path /foo/bar/readme.md
+		var path string
+		if indexPath[len(indexPath)-1] != '/' {
+			path = fmt.Sprintf("%v/%v", indexPath, filepath.Base(filePath))
+		} else {
+			path = fmt.Sprintf("%v%v", indexPath, filepath.Base(filePath))
+		}
+
+		// check if a file exists at this index path with the same name
+		exists, err := e.ExistsAtIndexPath(path)
+		if err != nil {
+			log.Error(err.Error())
+			return
+		}
+
+		// if file with same name exists at index path ask if want to overwrite it, cancel index if no
+		if exists {
+			fmt.Printf("\n Overwrite file that exists at index path: %v (y/n) ", path)
+
+			var input string
+			fmt.Scanln(&input)
+
+			switch input {
+			case "y", "yes", "Y", "YES":
+				break
+			case "n", "no", "NO", "No":
+				return
+			default:
+				return
+			}
+		}
+
 		fmt.Printf("\n Uploading %v\n", filePath)
 
 		// start progress bar for upload - proxy is used to increment progress bar
@@ -100,12 +153,13 @@ func main() {
 		bar.Start()
 
 		// index the file in search engine
-		e := engine.NewEngine(client)
 		err = e.Index(bar, proxyReader, filepath.Base(filePath), indexPath)
 		if err != nil {
 			log.Error(err.Error())
 			return
 		}
+
+		fmt.Println("")
 
 		return
 	case "search":

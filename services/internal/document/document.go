@@ -242,7 +242,7 @@ func (s *Service) CreateFolderPath(path string, recursing bool) (string, error) 
 	parentPath := path
 
 	// skip if we are at root folder path (reservedFolderName)
-	if parentPath != reservedFolderName {
+	if name != reservedFolderName {
 		parentFolders := strings.Split(path, "/")
 
 		for i := 0; i < len(parentFolders); i++ {
@@ -301,13 +301,20 @@ func (s *Service) GetDocumentByPath(path string) (*Document, error) {
 
 	// ensure that reservedFolderName is set in the path
 	if strings.Index(path, reservedFolderName) == -1 {
-		path = fmt.Sprintf("%v/%v", reservedFolderName, path)
+		if path != "/" {
+			path = fmt.Sprintf("%v/%v", reservedFolderName, path)
+		}
+
 	}
+
+	fmt.Println("HERE PATH: " + path)
+
+	fmt.Println("going to use: " + cleanPath(path) + "." + filename)
 
 	// remove filename from path because we don't want to clean it
 	path = strings.Replace(path, filename, "", 1)
 	args := map[string]interface{}{
-		"path": cleanPath(path) + filename,
+		"path": cleanPath(path) + "." + filename,
 	}
 
 	var r Document
@@ -332,7 +339,12 @@ func (s *Service) CreateDocument(d *Document) (*Document, error) {
 		return nil, errors.Wrap(err, "creating folder for document")
 	}
 
-	path := fmt.Sprintf("%v/%v", reservedFolderName, d.Path)
+	// don't build sub dir if path is the root
+	path := reservedFolderName
+	if d.Path != "/" {
+		path = fmt.Sprintf("%v/%v", reservedFolderName, d.Path)
+	}
+
 	args := map[string]interface{}{
 		"id":          uuid.New(),
 		"typeID":      d.TypeID,

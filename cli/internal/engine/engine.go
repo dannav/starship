@@ -98,7 +98,6 @@ func (e *Engine) DownloadFile(url string) error {
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		fmt.Println(res.StatusCode, endpoint)
 		return errDownloadingFile
 	}
 
@@ -109,6 +108,38 @@ func (e *Engine) DownloadFile(url string) error {
 	}
 
 	return nil
+}
+
+// ExistsAtIndexPath checks if a file already exists at this index path
+func (e *Engine) ExistsAtIndexPath(path string) (bool, error) {
+	endpoint := fmt.Sprintf("%v/v1/exists?path=%v", e.APIEndpoint, path)
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		err = errors.Wrap(err, "preparing exists request")
+		return false, err
+	}
+
+	res, err := e.Client.Do(req)
+	if err != nil {
+		err = errors.Wrap(err, "performing exists request")
+		return false, err
+	}
+
+	var exists bool
+	r := Response{
+		Results: &exists,
+	}
+
+	if err := json.NewDecoder(res.Body).Decode(&r); err != nil {
+		return false, errors.Wrap(err, "decoding exists response body")
+	}
+
+	if res.StatusCode != http.StatusOK {
+		err := WrapAPIErrors(errors.New("error checking index path existence"), r.Errors)
+		return false, err
+	}
+
+	return exists, nil
 }
 
 // Search returns all search results for a query

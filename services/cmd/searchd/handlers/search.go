@@ -95,7 +95,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 		}
 
 		// if first char is '/' and have multiple dirs remove leading '/'
-		if len(path) > 1 && path[0] == '/' {
+		if strings.Count(path, "/") > 1 && path[0] == '/' {
 			path = strings.Replace(path, "/", "", 1)
 		}
 		// end cleanup
