@@ -212,6 +212,17 @@ func main() {
 			}
 			searchResults.Documents[i].Text = text
 
+			// clean indexPath of search result
+			path := searchResults.Documents[i].Path
+
+			// replace all '.' with '/'
+			path = strings.Replace(path, ".", "/", -1)
+
+			// remove _rootfolder_ from beginning of path
+			path = strings.Replace(path, "_rootfolder_", "", 1)
+
+			searchResults.Documents[i].Path = path
+
 			// write search result template
 			o := output.NewTemplate(output.SearchType, searchResults.Documents[i])
 			err = o.Write()

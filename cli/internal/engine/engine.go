@@ -72,7 +72,7 @@ func WrapAPIErrors(err error, rErrs []ResponseError) error {
 func NewEngine(client *http.Client) Engine {
 	return Engine{
 		Client:      client,
-		APIEndpoint: "http://localhost:8080",
+		APIEndpoint: "http://167.99.237.235:8080",
 	}
 }
 
