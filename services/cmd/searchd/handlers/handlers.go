@@ -79,6 +79,10 @@ func (a *App) initHandler() {
 	ss := store.NewService(a.DB)
 
 	// api routes
+	r.Handle(http.MethodGet, "/v1/ready", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		web.Respond(w, r, http.StatusOK, nil)
+	})
+
 	r.Handle(http.MethodPost, "/v1/index", a.Index(ds, ss))
 	r.Handle(http.MethodGet, "/v1/search", a.Search(ds, ss))
 	r.Handle(http.MethodGet, "/v1/download", a.DownloadFile())

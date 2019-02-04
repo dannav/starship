@@ -9,16 +9,17 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
-	pb "gopkg.in/cheggaaa/pb.v1"
-
-	"github.com/briandowns/spinner"
 	"github.com/pkg/errors"
 )
 
+// endpoint for API
+const apiEndpoint = "http://localhost:8080"
+const spacesURL = "stuph.sfo2.digitaloceanspaces.com"
+
 var errSearch = errors.New("there was an error performing your search")
 var errDownloadingFile = errors.New("could not download file")
+var errAPINotReady = errors.New("the starship api is currently under maintenance and will be back shortly")
 
 // Engine represents the search engine
 type Engine struct {
@@ -72,13 +73,29 @@ func WrapAPIErrors(err error, rErrs []ResponseError) error {
 func NewEngine(client *http.Client) Engine {
 	return Engine{
 		Client:      client,
-		APIEndpoint: "http://167.99.237.235:8080",
+		APIEndpoint: apiEndpoint,
 	}
+}
+
+// Ready checks to see if the API is up and ready
+func (e *Engine) Ready() bool {
+	endpoint := fmt.Sprintf("%v/v1/ready", e.APIEndpoint)
+
+	res, err := http.Get(endpoint)
+	if err != nil {
+		return false
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return false
+	}
+
+	return true
 }
 
 // DownloadFile attempts to download a file from the api
 func (e *Engine) DownloadFile(url string) error {
-	baseURL := "stuph.sfo2.digitaloceanspaces.com/"
+	baseURL := spacesURL + "/"
 
 	// create file on disk and extract filename
 	filename := url[strings.LastIndex(url, "/")+1:]
@@ -187,9 +204,9 @@ func (e *Engine) Search(text string) (*SearchResponse, error) {
 }
 
 // Index stores and indexes a file with the API
-func (e *Engine) Index(bar *pb.ProgressBar, file io.Reader, filename, indexPath string) error {
-	var buf bytes.Buffer
-	encoder := multipart.NewWriter(&buf)
+func (e *Engine) Index(filePath, filename, indexPath string) error {
+	buf := &bytes.Buffer{}
+	encoder := multipart.NewWriter(buf)
 
 	pathField, err := encoder.CreateFormField("path")
 	if err != nil {
@@ -203,46 +220,43 @@ func (e *Engine) Index(bar *pb.ProgressBar, file io.Reader, filename, indexPath 
 		return err
 	}
 
-	field, err := encoder.CreateFormFile("content", filename)
+	contentField, err := encoder.CreateFormFile("content", filename)
 	if err != nil {
 		err = errors.Wrap(err, "creating content form field for index request")
 		return err
 	}
 
-	_, err = io.Copy(field, file)
+	// start reading the file
+	f, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	// copy file into request body for upload
+	_, err = io.Copy(contentField, f)
 	if err != nil {
 		err = errors.Wrap(err, "copying file to index request")
 		return err
 	}
-
 	encoder.Close()
-	bar.Finish()
-
-	// start a spinner while api performs indexing
-	s := spinner.New(spinner.CharSets[24], 100*time.Millisecond)
-	s.Prefix = " Indexing content... "
-	s.Start()
 
 	endpoint := fmt.Sprintf("%v/v1/index", e.APIEndpoint)
-	req, err := http.NewRequest(http.MethodPost, endpoint, &buf)
+	res, err := http.Post(endpoint, encoder.FormDataContentType(), buf)
 	if err != nil {
-		err = errors.Wrap(err, "preparing index request")
-		return err
-	}
-
-	req.Header.Set("Content-Type", encoder.FormDataContentType())
-	res, err := e.Client.Do(req)
-	if err != nil {
-		err = errors.Wrap(err, "performing idnex request")
+		err = errors.Wrap(err, "performing index request")
 		return err
 	}
 
 	if res.StatusCode != http.StatusNoContent {
-		err = errors.New("index request failed")
+		if res.StatusCode == http.StatusUnsupportedMediaType {
+			err = errors.New("Indexing for the given file type is not supported")
+		} else {
+			err = errors.New("index request failed")
+		}
+
 		return err
 	}
-
-	s.Stop()
 
 	return nil
 }

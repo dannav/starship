@@ -45,6 +45,8 @@ var MimeToDocType = map[string]int{
 	"application/pdf": document.TypePDF,
 }
 
+var errUnknownMimeType = errors.New("unknown media type")
+
 // GetDocType gets the document type from a mimeType
 func GetDocType(s string) int {
 	if _, ok := MimeToDocType[s]; !ok {
@@ -68,7 +70,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 			return
 		}
 
-		path := r.FormValue("path")
+		path := r.Header.Get("X-PATH")
 		if path == "" {
 			path = "/"
 		}
@@ -103,6 +105,11 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 		// pass file to apache tika for parsing to plaintext
 		tikaResp, err := a.TikaParse(file, header.Filename)
 		if err != nil {
+			if err := errors.Cause(err); err == errUnknownMimeType {
+				web.RespondError(w, r, http.StatusUnsupportedMediaType, err)
+				return
+			}
+
 			err = errors.Wrap(err, "contents parse failed")
 			web.RespondError(w, r, http.StatusServiceUnavailable, err)
 			return
@@ -167,6 +174,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 			Name:        header.Filename,
 			TypeID:      GetDocType(tikaResp.DocumentType),
 			DownloadURL: fmt.Sprintf("stuph.%v/%v", spacesURL, cdnFilename),
+			CDNFilename: cdnFilename,
 			Path:        path,
 			TeamID:      teamID,
 		}
@@ -189,7 +197,12 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 				return
 			}
 
-			// TODO :- delete from digital ocean spaces
+			// delete from do spaces
+			if err := client.RemoveObject("stuph", pDoc.CDNFilename); err != nil {
+				err = errors.Wrapf(err, "deleting object from cdn: %v", pDoc.CDNFilename)
+				web.RespondError(w, r, http.StatusInternalServerError, err)
+				return
+			}
 		}
 
 		// create document
@@ -492,6 +505,10 @@ func (a *App) TikaParse(file io.Reader, filename string) (*shared.TikaResponse, 
 	}
 
 	if res.StatusCode != http.StatusOK {
+		if res.StatusCode == http.StatusUnsupportedMediaType {
+			return nil, errUnknownMimeType
+		}
+
 		err = errors.New("tikad request failed")
 		return nil, err
 	}

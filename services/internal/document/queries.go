@@ -24,7 +24,7 @@ const (
 	`
 
 	insertDocument = `
-		INSERT INTO document (document_id, document_type_id, team_id, name, body, download_url, folder_id, path)
+		INSERT INTO document (document_id, document_type_id, team_id, name, body, download_url, folder_id, path, cdn_filename)
 		VALUES (
 			:id,
 			:typeID,
@@ -33,7 +33,8 @@ const (
 			:body,
 			:downloadURL,
 			:folderID,
-			:path
+			:path,
+			:cdnFilename
 		) RETURNING *
 	`
 

@@ -2,3 +2,4 @@
 vendor
 _vendor-*
 *.jar
+node_modules

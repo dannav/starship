@@ -74,6 +74,7 @@ type Document struct {
 	TypeID      int       `json:"typeID" db:"document_type_id"`
 	TeamID      string    `json:"teamID" db:"team_id"` // TODO convert to uuid.UUID when auth is in place
 	DownloadURL string    `json:"downloadURL" db:"download_url"`
+	CDNFilename string    `json:"cdnFilename" db:"cdn_filename"`
 	Path        string    `json:"path" db:"path"`
 	Name        string    `json:"name" db:"name"`
 	Body        string    `json:"body" db:"body"`
@@ -299,20 +300,17 @@ func (s *Service) GetDocumentByPath(path string) (*Document, error) {
 		return nil, err
 	}
 
-	// ensure that reservedFolderName is set in the path
-	if strings.Index(path, reservedFolderName) == -1 {
-		if path != "/" {
-			path = fmt.Sprintf("%v/%v", reservedFolderName, path)
-		}
-
+	// ensure that all paths have a leading '/'
+	if path[0] != '/' {
+		path = "/" + path
 	}
 
-	fmt.Println("HERE PATH: " + path)
-
-	fmt.Println("going to use: " + cleanPath(path) + "." + filename)
+	// replace leading slash with root folder
+	path = strings.Replace(path, "/", reservedFolderName, 1)
 
 	// remove filename from path because we don't want to clean it
 	path = strings.Replace(path, filename, "", 1)
+
 	args := map[string]interface{}{
 		"path": cleanPath(path) + "." + filename,
 	}
@@ -354,6 +352,7 @@ func (s *Service) CreateDocument(d *Document) (*Document, error) {
 		"path":        cleanPath(path) + "." + d.Name,
 		"downloadURL": d.DownloadURL,
 		"folderID":    folderID,
+		"cdnFilename": d.CDNFilename,
 	}
 
 	var r Document

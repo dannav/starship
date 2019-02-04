@@ -13,4 +13,10 @@ const (
 
 	// SearchRequestFailed represents an error where a request to the search api failed
 	SearchRequestFailed = "There was an issue performing your search."
+
+	// SearchNoResults represents an error where there were no search results
+	SearchNoResults = "No search results were found that matched your query."
+
+	// APINotAvailable represents an error where the API is currently down
+	APINotAvailable = "The starship API is currently experiencing maintenance and will be back shortly."
 )

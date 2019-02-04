@@ -43,6 +43,7 @@ const Schema = `
 		folder_id UUID NOT NULL,
 		team_id TEXT NOT NULL,
 		download_url TEXT NOT NULL,
+		cdn_filename TEXT NOT NULL,
 		path TEXT NOT NULL,
 		name TEXT NOT NULL,
 		body TEXT NOT NULL,

@@ -22,7 +22,6 @@ func (a *App) Parse() func(http.ResponseWriter, *http.Request, httprouter.Params
 			return
 		}
 		defer file.Close()
-
 		mimeType, err := a.Tika.Detect(context.Background(), file)
 		if err != nil {
 			err = errors.Wrap(err, "tika detect mime")
@@ -32,6 +31,9 @@ func (a *App) Parse() func(http.ResponseWriter, *http.Request, httprouter.Params
 		file.Seek(0, 0)
 
 		switch mimeType {
+		case "application/octet-stream":
+			web.RespondError(w, r, http.StatusUnsupportedMediaType, errors.New("unknown mime type"))
+			return
 		case "text/plain":
 			// markdown will register as text/plain mimeType
 			// plain text or markdown does not need to be parsed by apache tika

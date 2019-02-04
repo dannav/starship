@@ -77,14 +77,14 @@ func Index(file io.Reader, filename, path string) error {
 		return err
 	}
 
-	_, err = pathField.Write([]byte(path))
+	_, err = pathField.Write([]byte("/repo/myproject"))
 	if err != nil {
 		err = errors.Wrap(err, "writing index path to index request")
 		return err
 	}
 	encoder.Close()
 
-	endpoint := "http://167.99.237.235:8080/v1/index"
+	endpoint := "http://localhost:8080/v1/index"
 	req, err := http.NewRequest(http.MethodPost, endpoint, &buf)
 	if err != nil {
 		err = errors.Wrap(err, "preparing searchd request")

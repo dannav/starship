@@ -60,7 +60,9 @@ func RespondError(w http.ResponseWriter, r *http.Request, code int, err error) {
 		// Respond with generic error. Error messages and and codes may potentially contain
 		// sensitive information or help an attacker.
 		code = http.StatusInternalServerError
-		err = ErrInternalServer
+
+		// TODO - enable
+		// err = ErrInternalServer
 	}
 
 	resp := Response{
