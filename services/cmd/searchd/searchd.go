@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -20,17 +21,20 @@ import (
 )
 
 const (
-	// readTimeout is timeout for reading the request.
+	// readTimeout is timeout for reading the request
 	readTimeout = 30 * time.Second
 
-	// writeTimeout is timeout for reading the response.
+	// writeTimeout is timeout for reading the response
 	writeTimeout = 30 * time.Second
 
-	// shutdownTimeout is the timeout for shutdown.
+	// shutdownTimeout is the timeout for shutdown
 	shutdownTimeout = 30 * time.Second
 
-	// appPort is the port that the application listens on
-	appPort = 8080
+	// defaultAppPort is the port that the application listens on if not PORT env is set
+	defaultAppPort = 8080
+
+	// appPortEnv is the name of the environment variable that contains the port to run searchd on
+	appPortEnv = "PORT"
 
 	// postgresDSNEnv is the name of the environment variable that contains the postgres connection string dsn.
 	postgresDSNEnv = "POSTGRES_DSN"
@@ -45,9 +49,9 @@ const (
 )
 
 func main() {
-	port := fmt.Sprintf(":%d", appPort)
+	var runPort int
 
-	// If there was an error, exit main with non-zero status code.
+	// if there was an error, exit main with non-zero status code.
 	var mainErr error
 	defer func() {
 		if mainErr != nil {
@@ -59,8 +63,20 @@ func main() {
 		}
 	}()
 
-	// Setup Config
-	// ===============
+	// parse app config from environment variables
+	setPort := os.Getenv(appPortEnv)
+	if setPort == "" {
+		runPort = defaultAppPort
+	} else {
+		p, err := strconv.Atoi(setPort)
+		if err != nil {
+			mainErr = errors.Errorf("cannot convert PORT environment variable to int %s", err.Error())
+			return
+		}
+
+		runPort = p
+	}
+	port := fmt.Sprintf(":%d", runPort)
 
 	postgresDSN := os.Getenv(postgresDSNEnv)
 	if postgresDSN == "" {
@@ -80,9 +96,7 @@ func main() {
 		return
 	}
 
-	// Connect to DB
-	// ===============
-
+	// connect to db
 	dba, err := sqlx.Open("postgres", postgresDSN)
 	if err != nil {
 		mainErr = errors.Wrap(err, "open postgres database")
@@ -109,19 +123,19 @@ func main() {
 		}
 	}
 
-	// Create mysql db schema
+	// create mysql db schema
 	if _, err := dba.Exec(db.Schema); err != nil {
 		mainErr = errors.Wrap(err, "creating database schema")
 		return
 	}
 
-	// Create db indexes
+	// create db indexes
 	if _, err := dba.Exec(db.Indexes); err != nil {
 		mainErr = errors.Wrap(err, "creating database indexes")
 		return
 	}
 
-	// Run db seed
+	// run db seed
 	for _, s := range db.Seed {
 		if _, err := dba.Exec(s); err != nil {
 			mainErr = errors.Wrap(err, "seeding database")
@@ -129,7 +143,7 @@ func main() {
 		}
 	}
 
-	// force 10 second timeouts on all http requests
+	// force 30 second timeouts on all http requests
 	client := &http.Client{
 		Timeout: time.Second * 30,
 	}
@@ -139,9 +153,7 @@ func main() {
 		TikaURL:    tikadURL,
 	}
 
-	// Start API
-	// ===============
-
+	// start the API
 	app := handlers.NewApp(cfg, dba, client)
 	server := http.Server{
 		Addr:           port,
@@ -151,18 +163,18 @@ func main() {
 		MaxHeaderBytes: 1 << 20,
 	}
 
-	// Starting the service, listening for requests.
+	// starting the service, listening for requests.
 	serverErrors := make(chan error, 1)
 	go func() {
 		log.Infof("server started, listening on %s", port)
 		serverErrors <- server.ListenAndServe()
 	}()
 
-	// Blocking main and waiting for shutdown.
+	// blocking main and waiting for shutdown.
 	osSignals := make(chan os.Signal, 1)
 	signal.Notify(osSignals, os.Interrupt, syscall.SIGTERM)
 
-	// Wait for osSignal or error starting server
+	// wait for osSignal or error starting server
 	select {
 	case e := <-serverErrors:
 		mainErr = e
@@ -171,14 +183,12 @@ func main() {
 	case <-osSignals:
 	}
 
-	// Shutdown Server
-	// ===============
-
-	// Create context for Shutdown call.
+	// shutdown server
+	// create context for shutdown call.
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
-	// Asking listener to shutdown
+	// asking listener to shutdown
 	if err := server.Shutdown(ctx); err != nil {
 		mainErr = errors.Wrapf(err, "shutdown: graceful shutdown did not complete in %v", shutdownTimeout)
 

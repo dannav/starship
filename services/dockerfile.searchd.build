@@ -1,0 +1,17 @@
+# since we have spotify/annoy (which is cgo) it's easier to use a docker file as a reproducible
+# build environment that matches the ubuntu server we will be deploying to
+
+FROM ubuntu:16.04
+WORKDIR /root/go/src/github.com/dannav/starship/services
+RUN apt-get update -y
+RUN apt-get install software-properties-common -y
+RUN add-apt-repository ppa:gophers/archive -y
+RUN apt-get update -y
+RUN apt-get install golang-1.10-go gcc g++ git curl -y
+ENV PATH=/usr/lib/go-1.10/bin:$PATH
+RUN mkdir /root/go/bin
+ENV export GOPATH=/root/go
+ENV GOBIN=/root/go/bin
+ENV PATH=$GOBIN:$PATH
+RUN curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
+COPY . .

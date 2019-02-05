@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -18,25 +19,32 @@ import (
 )
 
 const (
-	// readTimeout is timeout for reading the request.
+	// readTimeout is timeout for reading the request
 	readTimeout = 30 * time.Second
 
-	// writeTimeout is timeout for reading the response.
+	// writeTimeout is timeout for reading the response
 	writeTimeout = 30 * time.Second
 
-	// shutdownTimeout is the timeout for shutdown.
+	// shutdownTimeout is the timeout for shutdown
 	shutdownTimeout = 30 * time.Second
 
-	// appPort is the port that the application listens on
-	appPort = 8080
+	// defaultAppPort is the port that the application listens on if not PORT env is set
+	defaultAppPort = 8080
 
+	// appPortEnv is the name of the environment variable that contains the port to run searchd on
+	appPortEnv = "PORT"
+
+	// tikaVersion is the version of apache tika to download
 	tikaVersion = "1.16"
+
+	// tikaPort is the port that apache tika runs on
+	tikaPort = "9998"
 )
 
 func main() {
-	port := fmt.Sprintf(":%d", appPort)
+	var runPort int
 
-	// If there was an error, exit main with non-zero status code.
+	// if there was an error, exit main with non-zero status code.
 	var mainErr error
 	defer func() {
 		if mainErr != nil {
@@ -48,12 +56,23 @@ func main() {
 		}
 	}()
 
-	// Start Apache Tika (used for detecting and converting filetypes)
-	// ===============================================================
+	// parse app config from environment variables
+	setPort := os.Getenv(appPortEnv)
+	if setPort == "" {
+		runPort = defaultAppPort
+	} else {
+		p, err := strconv.Atoi(setPort)
+		if err != nil {
+			mainErr = errors.Errorf("cannot convert PORT environment variable to int %s", err.Error())
+			return
+		}
 
-	tikaJar := fmt.Sprintf("tika-server-%v.jar", tikaVersion)
+		runPort = p
+	}
+	port := fmt.Sprintf(":%d", runPort)
 
 	// check if tika jar exists or download it
+	tikaJar := fmt.Sprintf("tika-server-%v.jar", tikaVersion)
 	if _, err := os.Stat(tikaJar); os.IsNotExist(err) {
 		log.Infof("apache tika not found, downloading version %v", tikaVersion)
 		err := tika.DownloadServer(context.Background(), tika.Version116, tikaJar)
@@ -64,12 +83,12 @@ func main() {
 		log.Info("apache tika downloaded successfully")
 	}
 
-	// force 10 second timeouts on all http requests
+	// force 30 second timeouts on all http requests
 	client := &http.Client{
 		Timeout: time.Second * 30,
 	}
 
-	opts := tika.WithPort("9998")
+	opts := tika.WithPort(tikaPort)
 	s, err := tika.NewServer(tikaJar, opts)
 	if err != nil {
 		mainErr = errors.Wrap(err, "instantiating new apache tika server")
@@ -84,8 +103,8 @@ func main() {
 	}
 
 	tikaClient := tika.NewClient(client, s.URL())
-
 	app := handlers.NewApp(tikaClient)
+
 	server := http.Server{
 		Addr:           port,
 		Handler:        app,
@@ -94,18 +113,18 @@ func main() {
 		MaxHeaderBytes: 1 << 20,
 	}
 
-	// Starting the service, listening for requests.
+	// start the API server
 	serverErrors := make(chan error, 1)
 	go func() {
 		log.Infof("server started, listening on %s", port)
 		serverErrors <- server.ListenAndServe()
 	}()
 
-	// Blocking main and waiting for shutdown.
+	// blocking main and waiting for shutdown.
 	osSignals := make(chan os.Signal, 1)
 	signal.Notify(osSignals, os.Interrupt, syscall.SIGTERM)
 
-	// Wait for osSignal or error starting server
+	// wait for osSignal or error starting server
 	select {
 	case e := <-serverErrors:
 		mainErr = e
@@ -114,17 +133,15 @@ func main() {
 	case <-osSignals:
 	}
 
-	// Shutdown Server
-	// ===============
-
-	// Create context for Shutdown call.
+	// shutdown server
+	// create context for Shutdown call.
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
 	// shutdown apache tika
 	shutdownTika()
 
-	// Asking listener to shutdown
+	// asking listener to shutdown
 	if err := server.Shutdown(ctx); err != nil {
 		mainErr = errors.Wrapf(err, "shutdown: graceful shutdown did not complete in %v", shutdownTimeout)
 
