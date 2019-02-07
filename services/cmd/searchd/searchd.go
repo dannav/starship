@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"os/user"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -60,6 +62,9 @@ const (
 
 	// objectStorageSecret is the secret ot use when connecting to object storage
 	objectStorageSecretEnv = "OBJECT_STORAGE_SECRET"
+
+	// storagePathEnv is the location to store the index and if no object storage is used documents
+	storagePathEnv = "STORAGE_PATH"
 )
 
 func main() {
@@ -107,6 +112,26 @@ func main() {
 	tikadURL := os.Getenv(tikadURLEnv)
 	if tikadURL == "" {
 		mainErr = errors.Errorf("missing required environment variable %s", tikadURLEnv)
+		return
+	}
+
+	storagePath := os.Getenv(storagePathEnv)
+	if storagePath == "" {
+		u, err := user.Current()
+		if err != nil {
+			mainErr = errors.Wrap(err, "could not get user running app")
+			return
+		}
+
+		storagePath = filepath.Join(u.HomeDir, ".starship")
+	} else {
+		storagePath = filepath.Clean(storagePath)
+	}
+
+	// create storagePath deepest dir (indexes)
+	err := os.MkdirAll(filepath.Join(storagePath, "indexes"), os.ModePerm)
+	if err != nil {
+		mainErr = errors.Wrap(err, "could not create storage directory")
 		return
 	}
 
@@ -211,8 +236,9 @@ func main() {
 	}
 
 	cfg := handlers.Cfg{
-		ServingURL: servingURL,
-		TikaURL:    tikadURL,
+		ServingURL:  servingURL,
+		TikaURL:     tikadURL,
+		StoragePath: storagePath,
 		ObjectStorageConfig: handlers.ObjectStorageCfg{ // get object storage cfg if set in env
 			URL:        os.Getenv(objectStorageURLEnv),
 			BucketName: os.Getenv(objectStorageBucketNameEnv),

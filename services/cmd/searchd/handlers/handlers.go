@@ -35,6 +35,7 @@ func (o *ObjectStorageCfg) Enabled() bool {
 type Cfg struct {
 	ServingURL          string
 	TikaURL             string
+	StoragePath         string
 	ObjectStorageConfig ObjectStorageCfg
 }
 

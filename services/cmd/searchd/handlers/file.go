@@ -15,6 +15,7 @@ import (
 )
 
 // TODO - have this configurable in an environment variable
+
 // RootFolder represents the root folder that documents for starship are stored on object storage
 const RootFolder = "starship_documents"
 

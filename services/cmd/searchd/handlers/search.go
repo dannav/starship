@@ -31,9 +31,6 @@ import (
 	prose "gopkg.in/jdkato/prose.v2"
 )
 
-// TODO - make configurable through env var and move to app boot
-var localStoragePath = filepath.Clean("/root/.starship/")
-
 // vDims represents how many dimensions a spotify/annoy index vector is (sized returned by tensorflow model)
 var vDims = 512
 
@@ -58,14 +55,6 @@ func GetDocType(s string) int {
 // Index handles creating word embeddings from a multi-part/file upload and indexing it for search purposes
 func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseWriter, *http.Request, httprouter.Params) {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		// TODO - move to app boot
-		err := os.MkdirAll(filepath.Join(localStoragePath, "indexes"), os.ModePerm)
-		if err != nil {
-			err = errors.Wrap(err, "creating .starship dir")
-			web.RespondError(w, r, http.StatusInternalServerError, err)
-			return
-		}
-
 		file, header, err := r.FormFile("content")
 		defer file.Close()
 
@@ -184,7 +173,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 				return
 			}
 		} else {
-			localFilePath = filepath.Join(localStoragePath, downloadURL)
+			localFilePath = filepath.Join(a.StoragePath, downloadURL)
 		}
 
 		if a.ObjectStorageEnabled {
@@ -274,7 +263,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 
 		// create new store if it does not exist
 		s := &store.Store{
-			Location: filepath.Join(localStoragePath, "indexes", "starship.ann"),
+			Location: filepath.Join(a.StoragePath, "indexes", "starship.ann"),
 		}
 
 		st, foundStore, err := ss.CreateStoreIfNotExists(s)
