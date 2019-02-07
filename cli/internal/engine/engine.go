@@ -14,9 +14,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-// endpoint for API
-const apiEndpoint = "http://localhost:8080"
-
 var errSearch = errors.New("there was an error performing your search")
 var errDownloadingFile = errors.New("could not download file")
 var errAPINotReady = errors.New("the starship api is currently under maintenance and will be back shortly")
@@ -70,10 +67,9 @@ func WrapAPIErrors(err error, rErrs []ResponseError) error {
 }
 
 // NewEngine creates a new engine
-func NewEngine(client *http.Client) Engine {
-	return Engine{
-		Client:      client,
-		APIEndpoint: apiEndpoint,
+func NewEngine(client *http.Client) *Engine {
+	return &Engine{
+		Client: client,
 	}
 }
 

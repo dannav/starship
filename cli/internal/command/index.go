@@ -13,7 +13,7 @@ import (
 )
 
 // Index is the document indexing command
-func Index(args []string, indexPath string, e engine.Engine) error {
+func Index(args []string, indexPath string, e *engine.Engine, forceYes bool) error {
 	// format index path to always have leading '/'
 	if indexPath[0] != '/' {
 		indexPath = "/" + indexPath
@@ -47,11 +47,21 @@ func Index(args []string, indexPath string, e engine.Engine) error {
 	}
 
 	// if file with same name exists at index path ask if user wants to overwrite it, cancel index if no
+	// skip input if yes flag was passed
 	if exists {
-		fmt.Printf(" Overwrite file that exists at index path: %v (y/n) ", path)
+		if forceYes {
+			fmt.Printf(" Overwriting file that exists at index path: %v ", path)
+		} else {
+			fmt.Printf(" Overwrite file that exists at index path: %v (y/n) ", path)
+		}
 
 		var input string
-		fmt.Scanln(&input)
+
+		if forceYes {
+			input = "y"
+		} else {
+			fmt.Scanln(&input)
+		}
 
 		switch input {
 		case "y", "yes", "Y", "YES":

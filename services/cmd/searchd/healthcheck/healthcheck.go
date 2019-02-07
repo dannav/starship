@@ -5,31 +5,27 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/pkg/errors"
 )
 
-// availableTFServingState is the state returned for a model when it is ready to be used
-const availableTFServingState = "AVAILABLE"
+// availableModelState is the state returned for a model when it is ready to be used
+const availableModelState = "AVAILABLE"
 
-type servingStatusBody struct {
+type modelStatusBody struct {
 	Code    string `json:"error_code"`
 	Message string `json:"error_message"`
 }
 
-type servingBody struct {
-	Version string            `json:"version"`
-	State   string            `json:"state"`
-	Status  servingStatusBody `json:"status"`
+type modelBody struct {
+	Version string          `json:"version"`
+	State   string          `json:"state"`
+	Status  modelStatusBody `json:"status"`
 }
 
-// ServingReady checks that tensorflow serving and our AI model is available
-func ServingReady(servingURL string) (bool, error) {
-	modelPathIndex := strings.LastIndex(servingURL, "/") + 1
-	modelEndpoint := servingURL[:modelPathIndex] + "universal_encoder"
-
-	u, err := url.Parse(modelEndpoint)
+// ModelReady checks that the ml model API and our AI model is available
+func ModelReady(modelURL string) (bool, error) {
+	u, err := url.Parse(modelURL)
 	if err != nil {
 		return false, err
 	}
@@ -40,28 +36,28 @@ func ServingReady(servingURL string) (bool, error) {
 	}
 
 	if res.StatusCode != http.StatusOK {
-		return false, errors.New("tfserving returned invalid status code")
+		return false, errors.New("ml model api returned invalid status code")
 	}
 
 	var body struct {
-		Results []servingBody `json:"model_version_status"`
+		Results []modelBody `json:"model_version_status"`
 	}
 
 	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
-		err = errors.Wrap(err, "decoding tfserving model response")
+		err = errors.Wrap(err, "decoding ml model api root model response")
 		return false, err
 	}
 
 	if len(body.Results) != 0 {
 		result := body.Results[0]
-		if result.State == availableTFServingState {
+		if result.State == availableModelState {
 			return true, nil
 		}
 
-		return false, errors.New("tfserving not in available state")
+		return false, errors.New("ml model not in available state")
 	}
 
-	return false, errors.New("tfserving response returned no model results")
+	return false, errors.New("ml model response returned no model results")
 }
 
 // TikaServiceReady checks that the ready endpoint of tikad is responding correctly

@@ -2,6 +2,14 @@
 
 
 [[projects]]
+  digest = "1:9f3b30d9f8e0d7040f729b82dcbc8f0dead820a133b3147ce355fc451f32d761"
+  name = "github.com/BurntSushi/toml"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "3012a1dbe2e4bd1391d42b32f0577cb7bbc7f005"
+  version = "v0.3.1"
+
+[[projects]]
   digest = "1:2fd83c8c2b1ff53fd7c4376a63c3a2f31e002e9296df9d7f150b07da524de88d"
   name = "github.com/briandowns/spinner"
   packages = ["."]
@@ -65,23 +73,15 @@
   pruneopts = "UT"
   revision = "b4a75ba826a64a70990f11a225237acd6ef35c9f"
 
-[[projects]]
-  digest = "1:94cad6e2359d57da6652e689189c5b6ef19f99db6304d2c41de54f6632e15143"
-  name = "gopkg.in/cheggaaa/pb.v1"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "1cc5bbe20449079337944d56292c7383510c534c"
-  version = "v1.0.27"
-
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
+    "github.com/BurntSushi/toml",
     "github.com/briandowns/spinner",
     "github.com/fatih/color",
     "github.com/nsf/termbox-go",
     "github.com/pkg/errors",
-    "gopkg.in/cheggaaa/pb.v1",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1

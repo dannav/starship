@@ -32,8 +32,11 @@ func (o *ObjectStorageCfg) Enabled() bool {
 }
 
 // Cfg represents the app config
+// ModelVectorDims represents how many dimensions a spotify/annoy index should be be (size of sentence embedding returned from ml model)
 type Cfg struct {
-	ServingURL          string
+	ModelURL            string
+	ModelName           string
+	ModelVectorDims     int
 	TikaURL             string
 	StoragePath         string
 	ObjectStorageConfig ObjectStorageCfg

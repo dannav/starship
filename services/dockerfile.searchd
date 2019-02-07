@@ -1,6 +1,9 @@
+# dockerfile for the searchd service
+
 # multi stage docker build
 # since we have spotify/annoy (which is cgo) we gotta build in this docker container first
 # with all of the application dependencies
+
 FROM alpine:3.8 AS build
 RUN apk add --update go=1.10.8-r0 gcc g++ dep git
 WORKDIR /root/go/src/github.com/dannav/starship/services

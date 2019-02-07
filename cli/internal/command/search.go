@@ -14,7 +14,7 @@ import (
 )
 
 // Search performs a search against all documents in the Starship API
-func Search(args []string, e engine.Engine) error {
+func Search(args []string, e *engine.Engine) error {
 	// ensure search text was provided
 	if len(args) == 0 {
 		return errors.New(uerrors.SearchNoTextGiven)

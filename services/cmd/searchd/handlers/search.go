@@ -31,8 +31,10 @@ import (
 	prose "gopkg.in/jdkato/prose.v2"
 )
 
-// vDims represents how many dimensions a spotify/annoy index vector is (sized returned by tensorflow model)
-var vDims = 512
+// ******
+// TODO - make loading of indexes faster - we can always store the index in memory so search and index functions
+// do not need to reload it from disk every time a request is made
+// ******
 
 // MimeToDocType translates a tika mimeType to a document type
 var MimeToDocType = map[string]int{
@@ -69,6 +71,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 			path = "/"
 		}
 
+		// TODO - replace with filepath.Clean() and test
 		// if path is multiple dirs remove any possible trailing or repeating '/'
 	cleanpath:
 		if path != "/" {
@@ -103,7 +106,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 				return
 			}
 
-			err = errors.Wrap(err, "contents parse failed")
+			err = errors.Wrap(err, "failed to extract text from document")
 			web.RespondError(w, r, http.StatusServiceUnavailable, err)
 			return
 		}
@@ -112,7 +115,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 		// create regex for non alphanumeric chars, ignore symbols commonly found in text
 		reg, err := regexp.Compile(`[^a-zA-Z0-9\s\.!?:;"'\$@&]+`)
 		if err != nil {
-			err = errors.Wrap(err, "non alpha regex")
+			err = errors.Wrap(err, "non alpha regex failed to compile")
 			web.RespondError(w, r, http.StatusInternalServerError, err)
 			return
 		}
@@ -120,12 +123,12 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 		// create regex for new lines on all systems \r is to catch newlines on windows
 		regNewLines, err := regexp.Compile(`\r?\n`)
 		if err != nil {
-			err = errors.Wrap(err, "newline regex")
+			err = errors.Wrap(err, "newline regex failed to compile")
 			web.RespondError(w, r, http.StatusInternalServerError, err)
 			return
 		}
 
-		// convert tika content resp to a prose document
+		// convert tika content resp to a prose document and ultimately tokenize the text
 		doc, err := prose.NewDocument(content)
 		if err != nil {
 			err = errors.Wrap(err, "tokenizing text")
@@ -144,19 +147,19 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 			uncleaned = append(uncleaned, regNewLines.ReplaceAllString(s.Text, " "))
 		}
 
-		// generate word embeddings from given text
-		es, err := embedding.Generate(inputs, a.ServingURL, a.HTTPClient)
+		// generate word embeddings from given text from ML model
+		es, err := embedding.Generate(inputs, a.ModelURL, a.HTTPClient)
 		if err != nil {
-			err = errors.Wrap(err, "cannot generate embeddings from text")
+			err = errors.Wrap(err, "could not generate embeddings from text")
 			web.RespondError(w, r, http.StatusServiceUnavailable, err)
 			return
 		}
 
-		// create locations for document
+		// set locations for document
 		fileLocation := fmt.Sprintf("%v/%v/%v", RootFolder, uuid.New().String(), header.Filename)
 		downloadURL := strings.Replace(fileLocation, RootFolder, "", 1)
 
-		// prepare a client to connect to object storage
+		// prepare a client to connect to object storage or setup local file path
 		var client *minio.Client
 		var objectStorageURL, localFilePath string
 		if a.ObjectStorageEnabled {
@@ -181,7 +184,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 		}
 
 		d := &document.Document{
-			Body:             content, // we store the content so we can do full text search with postgres
+			Body:             content, // we store the content so we can join FTS search with semantic search results
 			Name:             header.Filename,
 			TypeID:           GetDocType(tikaResp.DocumentType),
 			ObjectStorageURL: objectStorageURL,
@@ -199,6 +202,8 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 			}
 		}
 
+		// TODO - add document revisions
+		// this document already exists so we're going to delete it
 		if pDoc != nil {
 			err := ds.DeleteDocument(d.Path)
 			if err != nil {
@@ -207,7 +212,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 				return
 			}
 
-			// delete from object storage
+			// delete from object storage or local storage
 			if a.ObjectStorageEnabled {
 				if err := client.RemoveObject(a.ObjectStorageConfig.BucketName, pDoc.ObjectStorageURL); err != nil {
 					err = errors.Wrapf(err, "deleting object from object storage: %v", pDoc.ObjectStorageURL)
@@ -232,12 +237,11 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 			return
 		}
 
-		// move reader back to beginning of file so we can upload it to object storage or write it
+		// move reader back to beginning of file so we can either upload it to object storage or write it locally
 		file.Seek(0, 0)
 
 		// upload file to object storage
 		if a.ObjectStorageEnabled {
-			// store the file in object storage so we can download from a search
 			opts := minio.PutObjectOptions{
 				UserMetadata: map[string]string{},
 			}
@@ -257,8 +261,8 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 			}
 		}
 
-		// create a new annoy index to load data into
-		t := annoyindex.NewAnnoyIndexAngular(vDims)
+		// create a new annoy index to load embeddings into
+		t := annoyindex.NewAnnoyIndexAngular(a.ModelVectorDims)
 		defer t.Unload()
 
 		// create new store if it does not exist
@@ -273,7 +277,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 			return
 		}
 
-		// add newly indexed data into annoy and db
+		// add embeddings into annoy and db
 		for i := range inputs {
 			emb, err := json.Marshal(es[i])
 			if err != nil {
@@ -332,7 +336,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 			}
 		}
 
-		// build index with N trees, more trees gives higher precision when querying
+		// build index with N trees... more trees gives higher precision when querying
 		t.Build(15)
 		if s := t.Save(st.Location); !s {
 			err := errors.Errorf("failed to save index at location %v", st.Location)
@@ -348,6 +352,11 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 // Search performs a search on all documents with the given text
 func (a *App) Search(ds *document.Service, ss *store.Service) func(http.ResponseWriter, *http.Request, httprouter.Params) {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		type SearchResponse struct {
+			Distances []float32               `json:"distances"`
+			Documents []document.SearchResult `json:"documents"`
+		}
+
 		var b struct {
 			Text string `json:"text"`
 		}
@@ -367,7 +376,9 @@ func (a *App) Search(ds *document.Service, ss *store.Service) func(http.Response
 
 		// generate word embeddings from given text
 		searchText := []string{strings.ToLower(b.Text)}
-		es, err := embedding.Generate(searchText, a.ServingURL, a.HTTPClient)
+
+		// ml model api should follow tensorflow serving conventions which is where :predict comes form
+		es, err := embedding.Generate(searchText, a.ModelURL, a.HTTPClient)
 		if err != nil {
 			err = errors.New("cannot generate embeddings from text")
 			web.RespondError(w, r, http.StatusServiceUnavailable, err)
@@ -376,6 +387,12 @@ func (a *App) Search(ds *document.Service, ss *store.Service) func(http.Response
 
 		s, err := ss.GetStore()
 		if err != nil {
+			if err := errors.Cause(err); err == sql.ErrNoRows {
+				err = errors.Wrap(err, "no documents indexed")
+				web.Respond(w, r, http.StatusOK, SearchResponse{})
+				return
+			}
+
 			err = errors.Wrap(err, "get store")
 			web.RespondError(w, r, http.StatusInternalServerError, err)
 			return
@@ -383,13 +400,13 @@ func (a *App) Search(ds *document.Service, ss *store.Service) func(http.Response
 
 		// check if file exists at store location
 		if _, err := os.Stat(s.Location); os.IsNotExist(err) {
-			err := errors.Errorf("file `%v` does not exist", s.Location)
+			err := errors.Errorf("index file `%v` does not exist, content must be re indexed", s.Location)
 			web.RespondError(w, r, http.StatusBadRequest, err)
 			return
 		}
 
 		// create and load index on disk into memory
-		t := annoyindex.NewAnnoyIndexAngular(vDims)
+		t := annoyindex.NewAnnoyIndexAngular(a.ModelVectorDims)
 		defer t.Unload()
 
 		if success := t.Load(s.Location); !success {
@@ -439,11 +456,10 @@ func (a *App) Search(ds *document.Service, ss *store.Service) func(http.Response
 			return
 		}
 
-		// Ranking System Process (TODO :- run tests and tweak this for best results)
-		// =======================================================================
+		// Ranking System Process
+		// ======================
 
 		// 1. Start with distance from searchtext for annoy search results (set above when creating docsSorted)
-
 		// ultimately combine fts results and annoy search results
 		uniqResults := map[string]bool{}
 		docs = []document.SearchResult{}
@@ -465,7 +481,7 @@ func (a *App) Search(ds *document.Service, ss *store.Service) func(http.Response
 			docs = append(docs, d)
 		}
 
-		// 3. use .8 - relevancy as rank for fts results, this ensures that by default fts results are ranked slightly better than semantic
+		// 3. use .8 - relevancy as rank for fts results, this ensures that by default fts results are ranked slightly better than semantic results
 		for _, f := range ftsDocs {
 			if _, ok := uniqResults[f.SentenceID.String()]; ok {
 				continue
@@ -477,15 +493,13 @@ func (a *App) Search(ds *document.Service, ss *store.Service) func(http.Response
 			docs = append(docs, f)
 		}
 
-		// Finally, order by lowest rank first
+		// Finally, order by lowest rank first - rank is distance from current search
+		// lower is better
 		sort.Slice(docs, func(i, j int) bool {
 			return docs[i].Rank < docs[j].Rank
 		})
 
-		result := struct {
-			Distances []float32               `json:"distances"`
-			Documents []document.SearchResult `json:"documents"`
-		}{
+		result := SearchResponse{
 			Distances: distances,
 			Documents: docs,
 		}
@@ -494,7 +508,7 @@ func (a *App) Search(ds *document.Service, ss *store.Service) func(http.Response
 	}
 }
 
-// TikaParse makes a request to the tikad endpoint to parse a file
+// TikaParse makes a request to the tikad endpoint to extract the text from a file
 func (a *App) TikaParse(file io.Reader, filename string) (*shared.TikaResponse, error) {
 	var buf bytes.Buffer
 	encoder := multipart.NewWriter(&buf)

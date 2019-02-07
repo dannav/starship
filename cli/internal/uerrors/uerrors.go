@@ -15,8 +15,8 @@ const (
 	SearchRequestFailed = "There was an issue performing your search."
 
 	// SearchNoResults represents an error where there were no search results
-	SearchNoResults = "No search results were found that matched your query."
+	SearchNoResults = "No search results were found that matched your query. Have you indexed any files?"
 
 	// APINotAvailable represents an error where the API is currently down
-	APINotAvailable = "The starship API is currently experiencing maintenance and will be back shortly."
+	APINotAvailable = "Could not connect to the Starship API. Ensure that the proper url is set in ~/.starship/starship.conf"
 )

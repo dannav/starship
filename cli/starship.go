@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dannav/starship/cli/internal/command"
+	"github.com/dannav/starship/cli/internal/config"
 	"github.com/dannav/starship/cli/internal/engine"
 	"github.com/dannav/starship/cli/internal/help"
 	"github.com/dannav/starship/cli/internal/log"
@@ -34,12 +35,17 @@ var (
 
 	// indexPath is a flag that denotes what path to index content at for a document
 	indexPath string
+
+	// forceYes is a flag that forces a yes input for any prompts
+	forceYes bool
 )
 
 // init runs first, it parses any flags and arguments for this cli app
 func init() {
 	flag.BoolVar(&showHelp, "h", false, "show help text")
 	flag.BoolVar(&showHelp, "help", false, "show help text")
+	flag.BoolVar(&forceYes, "y", false, "force yes on prompt")
+	flag.BoolVar(&forceYes, "yes", false, "force yes on prompt")
 	flag.StringVar(&indexPath, "p", "/", "path to store document in index")
 	flag.Parse()
 
@@ -59,14 +65,25 @@ func main() {
 
 	// check to see if the starship API is up and functioning
 	e := engine.NewEngine(client)
-	ready, err := e.Ready()
-	if ready != true {
+
+	// load or set config if we need it for the command we are running
+	if cmd == "index" || cmd == "search" {
+		cfg, err := config.NewConfigManager()
 		if err != nil {
 			log.Error(err.Error())
+			return
 		}
+		e.APIEndpoint = cfg.APIURL
 
-		log.Error(uerrors.APINotAvailable)
-		return
+		ready, err := e.Ready()
+		if ready != true {
+			if err != nil {
+				log.Error(err.Error())
+			}
+
+			log.Error(uerrors.APINotAvailable)
+			return
+		}
 	}
 
 	// cli main logic
@@ -90,7 +107,7 @@ func main() {
 		return
 	case "index":
 		// index file passed in argument
-		if err := command.Index(args, indexPath, e); err != nil {
+		if err := command.Index(args, indexPath, e, forceYes); err != nil {
 			log.Error(err.Error())
 			return
 		}

@@ -34,7 +34,7 @@ const (
 	// shutdownTimeout is the timeout for shutdown
 	shutdownTimeout = 30 * time.Second
 
-	// defaultAppPort is the port that the application listens on if not PORT env is set
+	// defaultAppPort is the port that the application listens on if no PORT env is set
 	defaultAppPort = 8080
 
 	// appPortEnv is the name of the environment variable that contains the port to run searchd on
@@ -43,9 +43,14 @@ const (
 	// postgresDSNEnv is the name of the environment variable that contains the postgres connection string dsn.
 	postgresDSNEnv = "POSTGRES_DSN"
 
-	// servingURLEnv is the name of the environment variable that holds the URL
-	// to serving endpoint of the universal sentence encoder
-	servingURLEnv = "SERVING_URL"
+	// modelURLEnv is the name of the environment variable that holds the URL
+	// to machine learning model endpoint. it should point directly to the machine learning model
+	// and follow tensorflow serving conventions. i.e. http://tfserving/v1/models/{model_name}
+	modelURLEnv = "MODEL_URL"
+
+	// modelVectorDimensionsEnv is the name of the environment variable that defines how many vector dimensions the
+	// machine learning model returns for a sentence embedding
+	modelVectorDimensionsEnv = "MODEL_VECTOR_DIMENSIONS"
 
 	// tikadURLEnv is the name of the environment variable that holds the URL
 	// to the tika service which converts documents to plain text
@@ -64,7 +69,11 @@ const (
 	objectStorageSecretEnv = "OBJECT_STORAGE_SECRET"
 
 	// storagePathEnv is the location to store the index and if no object storage is used documents
+	// ensure that the user running this app has permissions to read / write here
 	storagePathEnv = "STORAGE_PATH"
+
+	// storageDir is the root folder to store cfg, indexes, and files given the storagePath
+	storageDir = ".starship"
 )
 
 func main() {
@@ -103,9 +112,21 @@ func main() {
 		return
 	}
 
-	servingURL := os.Getenv(servingURLEnv)
-	if servingURL == "" {
-		mainErr = errors.Errorf("missing required environment variable %s", servingURLEnv)
+	modelURL := os.Getenv(modelURLEnv)
+	if modelURL == "" {
+		mainErr = errors.Errorf("missing required environment variable %s", modelURLEnv)
+		return
+	}
+
+	modelVectorDims := os.Getenv(modelVectorDimensionsEnv)
+	if modelVectorDims == "" {
+		mainErr = errors.Errorf("missing required environment variable %s", modelVectorDimensionsEnv)
+		return
+	}
+
+	vDims, err := strconv.Atoi(modelVectorDims)
+	if err != nil {
+		mainErr = errors.Errorf("environment variable %v cannot be converted to an int: %s", modelVectorDimensionsEnv, err.Error())
 		return
 	}
 
@@ -123,13 +144,14 @@ func main() {
 			return
 		}
 
-		storagePath = filepath.Join(u.HomeDir, ".starship")
+		// set storagePath to the default storage path to store cfg, indexes, and files
+		storagePath = filepath.Join(u.HomeDir, storageDir)
 	} else {
 		storagePath = filepath.Clean(storagePath)
 	}
 
 	// create storagePath deepest dir (indexes)
-	err := os.MkdirAll(filepath.Join(storagePath, "indexes"), os.ModePerm)
+	err = os.MkdirAll(filepath.Join(storagePath, "indexes"), os.ModePerm)
 	if err != nil {
 		mainErr = errors.Wrap(err, "could not create storage directory")
 		return
@@ -159,26 +181,26 @@ func main() {
 		}
 	}
 
-	// wait for tfserving to be ready
-	var servingReady bool
+	// wait for ML model API to be ready
+	var modelAPIReady bool
 	for {
-		log.Info("waiting for serving to be ready")
+		log.Info("waiting for ml model api to be ready")
 		ticker := time.NewTicker(time.Second)
 
 		select {
 		case <-ticker.C:
-			ready, err := healthcheck.ServingReady(servingURL)
+			ready, err := healthcheck.ModelReady(modelURL)
 			if err != nil && strings.Index(err.Error(), "connection refused") == -1 { // skip exiting if the service isn't started yet
-				mainErr = errors.Wrap(err, "serving connection error")
+				mainErr = errors.Wrap(err, "ml model api connection error")
 				return
 			}
 
 			if ready == true {
-				servingReady = true
+				modelAPIReady = true
 			}
 		}
 
-		if servingReady {
+		if modelAPIReady {
 			break
 		}
 	}
@@ -236,9 +258,10 @@ func main() {
 	}
 
 	cfg := handlers.Cfg{
-		ServingURL:  servingURL,
-		TikaURL:     tikadURL,
-		StoragePath: storagePath,
+		ModelURL:        modelURL,
+		ModelVectorDims: vDims,
+		TikaURL:         tikadURL,
+		StoragePath:     storagePath,
 		ObjectStorageConfig: handlers.ObjectStorageCfg{ // get object storage cfg if set in env
 			URL:        os.Getenv(objectStorageURLEnv),
 			BucketName: os.Getenv(objectStorageBucketNameEnv),

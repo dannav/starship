@@ -13,12 +13,13 @@ The commands are:
 
 	index     store a document in the search engine
 	search    search all documents for relevant information
+	set       set cli config
 
 Use "starship help [command]" for more information about a command.
 `
 
 var indexText = `
-Usage: starship [-p path to store in search index] index [path to file]
+Usage: starship [-p path to store in search index (optional)] index [path to file]
 
 The Index command allows you to store a document in your teams search index for
 retrieval using the search command.
