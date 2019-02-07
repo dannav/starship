@@ -14,31 +14,46 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Digital Ocean Spaces info
-var doKey = "E7GJPSBYFMF5SJU7P4TC"
-var doSecret = "N/K398tqDdLak67JrXYMzYEW/a1juFhC3rSxVuC5s5M"
-var spacesURL = "sfo2.digitaloceanspaces.com"
+// ObjectStorageCfg represents configuration passed for connecting to object storage
+type ObjectStorageCfg struct {
+	URL        string
+	BucketName string
+	Key        string
+	Secret     string
+}
+
+// Enabled checks if ObjectStorageCfg is configured properly
+func (o *ObjectStorageCfg) Enabled() bool {
+	if o.URL != "" && o.BucketName != "" && o.Key != "" && o.Secret != "" {
+		return true
+	}
+
+	return false
+}
 
 // Cfg represents the app config
 type Cfg struct {
-	ServingURL string
-	TikaURL    string
+	ServingURL          string
+	TikaURL             string
+	ObjectStorageConfig ObjectStorageCfg
 }
 
 // App represents the application and configuration
 type App struct {
-	handler    http.Handler
-	DB         *sqlx.DB
-	HTTPClient *http.Client
+	handler              http.Handler
+	DB                   *sqlx.DB
+	HTTPClient           *http.Client
+	ObjectStorageEnabled bool
 	Cfg
 }
 
 // NewApp returns a new instance of App with config and DB connections loaded
 func NewApp(cfg Cfg, db *sqlx.DB, client *http.Client) *App {
 	a := App{
-		Cfg:        cfg,
-		DB:         db,
-		HTTPClient: client,
+		Cfg:                  cfg,
+		DB:                   db,
+		HTTPClient:           client,
+		ObjectStorageEnabled: cfg.ObjectStorageConfig.Enabled(),
 	}
 
 	a.initHandler()
@@ -51,7 +66,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	a.handler.ServeHTTP(w, r)
 }
 
-// initHandler creates a new router initializes and all the routes
+// initHandler creates a new router and initializes all the routes
 func (a *App) initHandler() {
 	r := httprouter.New()
 
@@ -79,7 +94,7 @@ func (a *App) initHandler() {
 	ss := store.NewService(a.DB)
 
 	// api routes
-	r.Handle(http.MethodGet, "/v1/ready", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	r.Handle(http.MethodGet, "/ready", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 		web.Respond(w, r, http.StatusOK, nil)
 	})
 

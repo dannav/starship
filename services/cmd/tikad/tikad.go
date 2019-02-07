@@ -102,9 +102,9 @@ func main() {
 		return
 	}
 
+	// create the API
 	tikaClient := tika.NewClient(client, s.URL())
 	app := handlers.NewApp(tikaClient)
-
 	server := http.Server{
 		Addr:           port,
 		Handler:        app,
@@ -120,7 +120,7 @@ func main() {
 		serverErrors <- server.ListenAndServe()
 	}()
 
-	// blocking main and waiting for shutdown.
+	// blocking main and waiting for shutdown
 	osSignals := make(chan os.Signal, 1)
 	signal.Notify(osSignals, os.Interrupt, syscall.SIGTERM)
 
@@ -134,7 +134,7 @@ func main() {
 	}
 
 	// shutdown server
-	// create context for Shutdown call.
+	// create context for shutdown call
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
@@ -148,7 +148,5 @@ func main() {
 		if err := server.Close(); err != nil {
 			mainErr = errors.Wrapf(err, "shutdown: error killing server")
 		}
-
-		return
 	}
 }

@@ -59,8 +59,12 @@ func main() {
 
 	// check to see if the starship API is up and functioning
 	e := engine.NewEngine(client)
-	ready := e.Ready()
+	ready, err := e.Ready()
 	if ready != true {
+		if err != nil {
+			log.Error(err.Error())
+		}
+
 		log.Error(uerrors.APINotAvailable)
 		return
 	}

@@ -1,10 +1,3 @@
-/*
-	Initially only support markdown and text files
-
-	enhance to support .docx, .doc, .pdf, .rtf, etc...
-	supporting multiple file formats can be done with apache tika
-*/
-
 package handlers
 
 import (
@@ -21,21 +14,25 @@ import (
 	"github.com/pkg/errors"
 )
 
-// DownloadFile handles downloading a file from blob storage
+// TODO - have this configurable in an environment variable
+// RootFolder represents the root folder that documents for starship are stored on object storage
+const RootFolder = "starship_documents"
+
+// DownloadFile handles downloading a file from object storage
 func (a *App) DownloadFile() func(http.ResponseWriter, *http.Request, httprouter.Params) {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		file := r.URL.Query().Get("file")
-		client, err := minio.New(spacesURL, doKey, doSecret, true)
+		file := RootFolder + r.URL.Query().Get("file")
+		client, err := minio.New(a.ObjectStorageConfig.URL, a.ObjectStorageConfig.Key, a.ObjectStorageConfig.Secret, true)
 		if err != nil {
-			err = errors.Wrap(err, "connecting to do spaces")
+			err = errors.Wrap(err, "connecting to object storage, is the config provided correct?")
 			web.RespondError(w, r, http.StatusInternalServerError, err)
 			return
 		}
 
 		opts := minio.GetObjectOptions{}
-		o, err := client.GetObject("stuph", file, opts)
-		if err != nil {
-			err = errors.Wrap(err, "downloading file")
+		o, err := client.GetObject(a.ObjectStorageConfig.BucketName, file, opts)
+		if err != nil && o != nil {
+			err = errors.Wrap(err, "downloading file from object storage")
 			web.RespondError(w, r, http.StatusInternalServerError, err)
 			return
 		}
@@ -62,8 +59,6 @@ func (a *App) DownloadFile() func(http.ResponseWriter, *http.Request, httprouter
 // CheckFileExistence determines whether a file exists at the given path for an account
 func (a *App) CheckFileExistence(ds *document.Service) func(http.ResponseWriter, *http.Request, httprouter.Params) {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		// teamID := "1" // TODO replace with user auth
-
 		path := r.URL.Query().Get("path")
 		_, err := ds.GetDocumentByPath(path)
 		if err != nil {

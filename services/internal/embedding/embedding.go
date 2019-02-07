@@ -3,7 +3,6 @@ package embedding
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/pkg/errors"
@@ -35,7 +34,7 @@ func Generate(inputs []string, url string, client *http.Client) ([][]float32, er
 		return nil, errors.Wrap(err, "could not marshal serving request body")
 	}
 
-	endpoint := fmt.Sprintf("http://%v", url)
+	endpoint := url
 	req, err := http.NewRequest(http.MethodPost, endpoint, &body)
 	if err != nil {
 		return nil, errors.Wrap(err, "create serving request")

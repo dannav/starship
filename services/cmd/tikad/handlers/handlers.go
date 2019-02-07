@@ -34,7 +34,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	a.handler.ServeHTTP(w, r)
 }
 
-// initHandler creates a new router initializes and all the routes
+// initHandler creates a new router and initializes all the routes
 func (a *App) initHandler() {
 	r := httprouter.New()
 
@@ -53,6 +53,10 @@ func (a *App) initHandler() {
 	}
 
 	// api routes
+	r.Handle(http.MethodGet, "/ready", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		web.Respond(w, r, http.StatusOK, nil)
+	})
+
 	r.POST("/v1/parse", a.Parse())
 
 	// wrap all the routes with global middleware

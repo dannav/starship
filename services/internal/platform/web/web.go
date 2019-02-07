@@ -61,7 +61,7 @@ func RespondError(w http.ResponseWriter, r *http.Request, code int, err error) {
 		// sensitive information or help an attacker.
 		code = http.StatusInternalServerError
 
-		// TODO - enable
+		// TODO - maybe set this for security purposes
 		// err = ErrInternalServer
 	}
 

@@ -35,11 +35,16 @@ services:
     - '8080:8080'
     restart: on-failure
     volumes:
-      - searchd:/opt/indexes
+      - searchd:/opt
     environment:
       POSTGRES_DSN: "user=postgres password=password host=db dbname=postgres sslmode=disable"
-      SERVING_URL: "serving:8501/v1/models/universal_encoder:predict"
-      TIKAD_URL: "tikad:8080"
+      SERVING_URL: "http://serving:8501/v1/models/universal_encoder:predict"
+      TIKAD_URL: "http://tikad:8080"
+      # uncomment to use object storage
+      # OBJECT_STORAGE_URL: "sfo2.digitaloceanspaces.com"
+      # OBJECT_STORAGE_KEY: "E7GJPSBYFMF5SJU7P4TC"
+      # OBJECT_STORAGE_SECRET: "N/K398tqDdLak67JrXYMzYEW/a1juFhC3rSxVuC5s5M"
+      # OBJECT_STORAGE_BUCKET: "stuph"
   tikad: # apache tika parsing api
     build:
       context: .

@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -15,7 +16,6 @@ import (
 
 // endpoint for API
 const apiEndpoint = "http://localhost:8080"
-const spacesURL = "stuph.sfo2.digitaloceanspaces.com"
 
 var errSearch = errors.New("there was an error performing your search")
 var errDownloadingFile = errors.New("could not download file")
@@ -78,35 +78,33 @@ func NewEngine(client *http.Client) Engine {
 }
 
 // Ready checks to see if the API is up and ready
-func (e *Engine) Ready() bool {
-	endpoint := fmt.Sprintf("%v/v1/ready", e.APIEndpoint)
-
-	res, err := http.Get(endpoint)
+func (e *Engine) Ready() (bool, error) {
+	endpoint := fmt.Sprintf("%v/ready", e.APIEndpoint)
+	u, err := url.Parse(endpoint)
 	if err != nil {
-		return false
+		return false, err
+	}
+
+	res, err := http.Get(u.String())
+	if err != nil {
+		return false, err
 	}
 
 	if res.StatusCode != http.StatusOK {
-		return false
+		return false, errors.New("starship api is down")
 	}
 
-	return true
+	return true, nil
 }
 
 // DownloadFile attempts to download a file from the api
 func (e *Engine) DownloadFile(url string) error {
-	baseURL := spacesURL + "/"
-
 	// create file on disk and extract filename
 	filename := url[strings.LastIndex(url, "/")+1:]
 	out, err := os.Create(filename)
 	defer out.Close()
 
-	// create file url query to download
-	fileWithTeam := strings.Replace(url, baseURL, "", 1)
-	file := fileWithTeam[strings.Index(fileWithTeam, "/")-1:]
-
-	endpoint := fmt.Sprintf("%v/v1/download?file=%v", e.APIEndpoint, file)
+	endpoint := fmt.Sprintf("%v/v1/download?file=%v", e.APIEndpoint, url)
 	res, err := http.Get(endpoint)
 	if err != nil {
 		err = errors.Wrap(err, "downloading file")

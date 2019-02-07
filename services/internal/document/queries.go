@@ -4,17 +4,16 @@ const (
 	deleteFolder = `DELETE FROM folder WHERE folder_id = :id`
 
 	insertFolder = `
-		INSERT INTO folder (folder_id, team_id, name, path)
+		INSERT INTO folder (folder_id, name, path)
 		VALUES (
 			:id,
-			:teamID,
 			:name,
 			:path
 		) ON CONFLICT DO NOTHING
 	`
 
 	getFolderByPath = `
-			SELECT * FROM folder WHERE path = :path AND team_id = :teamID
+			SELECT * FROM folder WHERE path = :path
 	`
 
 	deleteDocumentByPath = `DELETE FROM document WHERE path = :path`
@@ -24,17 +23,16 @@ const (
 	`
 
 	insertDocument = `
-		INSERT INTO document (document_id, document_type_id, team_id, name, body, download_url, folder_id, path, cdn_filename)
+		INSERT INTO document (document_id, document_type_id, name, body, download_url, folder_id, path, object_storage_url)
 		VALUES (
 			:id,
 			:typeID,
-			:teamID,
 			:name,
 			:body,
 			:downloadURL,
 			:folderID,
 			:path,
-			:cdnFilename
+			:objectStorageURL
 		) RETURNING *
 	`
 
@@ -58,14 +56,14 @@ const (
 		SELECT * FROM sentence WHERE document_id = ?
 	`
 
-	getIndexContentForTeam = `
+	getIndexContent = `
 		SELECT
 			s.sentence_id,
 			s.document_id,
 			s.annoy_id,
 			s.embedding
 		FROM sentence s
-		INNER JOIN document d ON s.document_id = d.document_id AND d.team_id = :teamID
+		INNER JOIN document d ON s.document_id = d.document_id
 	`
 
 	getDocumentsBySentence = `

@@ -12,21 +12,19 @@ const Schema = `
 
 	CREATE TABLE IF NOT EXISTS folder (
 		folder_id UUID NOT NULL PRIMARY KEY,
-		team_id TEXT NOT NULL,
     name TEXT NOT NULL,
 		path ltree,
 		created TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
 		updated TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
-		CONSTRAINT uniq_path UNIQUE (path, team_id)
+		CONSTRAINT uniq_path UNIQUE (path)
 	);
 
 	CREATE TABLE IF NOT EXISTS store (
 		store_id UUID NOT NULL PRIMARY KEY,
-		team_id TEXT NOT NULL,
 		location TEXT NOT NULL,
 		created TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
 		updated TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
-		CONSTRAINT uniq_store UNIQUE (team_id, location)
+		CONSTRAINT uniq_store UNIQUE (location)
 	);
 
 	CREATE TABLE IF NOT EXISTS document_type (
@@ -41,9 +39,8 @@ const Schema = `
 		document_id UUID NOT NULL PRIMARY KEY,
 		document_type_id INT NOT NULL,
 		folder_id UUID NOT NULL,
-		team_id TEXT NOT NULL,
 		download_url TEXT NOT NULL,
-		cdn_filename TEXT NOT NULL,
+		object_storage_url TEXT NOT NULL DEFAULT '',
 		path TEXT NOT NULL,
 		name TEXT NOT NULL,
 		body TEXT NOT NULL,
@@ -73,8 +70,6 @@ const Indexes = `
 	CREATE INDEX IF NOT EXISTS sentence_annoyid ON sentence (annoy_id);
 
 	CREATE INDEX IF NOT EXISTS sentence_docid ON sentence (document_id);
-
-	CREATE INDEX IF NOT EXISTS document_teamid ON document (team_id);
 
 	CREATE INDEX IF NOT EXISTS document_path ON document (path);
 

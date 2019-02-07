@@ -23,7 +23,6 @@ var (
 // Store represents an annoy store
 type Store struct {
 	ID       uuid.UUID `json:"id" db:"store_id"`
-	TeamID   string    `json:"teamID" db:"team_id"`
 	Location string    `json:"-" db:"location"`
 	Created  time.Time `json:"created" db:"created"`
 	Updated  time.Time `json:"updated" db:"updated"`
@@ -45,13 +44,7 @@ func NewService(db *sqlx.DB) *Service {
 
 // CreateStoreIfNotExists creates a new store if it does not exist or returns it if it does
 func (serv *Service) CreateStoreIfNotExists(s *Store) (*Store, bool, error) {
-	stmt, err := serv.DB.PrepareNamed(insertStore)
-	if err != nil {
-		return nil, false, errors.Wrap(err, "preparing insert store query")
-	}
-	defer stmt.Close()
-
-	st, err := serv.GetStoreByTeamID(s.TeamID)
+	st, err := serv.GetStore()
 	if err != nil {
 		if err := errors.Cause(err); err != sql.ErrNoRows {
 			return nil, false, errors.Wrap(err, "get store by name")
@@ -60,9 +53,14 @@ func (serv *Service) CreateStoreIfNotExists(s *Store) (*Store, bool, error) {
 
 	// didn't find the store so we should create it
 	if err := errors.Cause(err); err == sql.ErrNoRows {
+		stmt, err := serv.DB.PrepareNamed(insertStore)
+		if err != nil {
+			return nil, false, errors.Wrap(err, "preparing insert store query")
+		}
+		defer stmt.Close()
+
 		args := map[string]interface{}{
 			"id":       uuid.New(),
-			"teamID":   s.TeamID,
 			"location": s.Location,
 		}
 
@@ -84,20 +82,10 @@ func (serv *Service) CreateStoreIfNotExists(s *Store) (*Store, bool, error) {
 	return st, true, nil
 }
 
-// GetStoreByTeamID retrieves a store from the database by name
-func (serv *Service) GetStoreByTeamID(teamID string) (*Store, error) {
-	stmt, err := serv.DB.PrepareNamed(getStoreByTeamID)
-	if err != nil {
-		return nil, errors.Wrap(err, "preparing get store query")
-	}
-	defer stmt.Close()
-
-	args := map[string]interface{}{
-		"teamID": teamID,
-	}
-
+// GetStore retrieves a store from the database
+func (serv *Service) GetStore() (*Store, error) {
 	var r Store
-	if err := stmt.Get(&r, args); err != nil {
+	if err := serv.DB.Get(&r, getStore); err != nil {
 		return nil, errors.Wrap(err, "get store query")
 	}
 

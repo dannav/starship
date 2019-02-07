@@ -1,10 +1,3 @@
-/*
-	Initially only support markdown and text files
-
-	enhance to support .docx, .doc, .pdf, .rtf, etc...
-	supporting multiple file formats can be done with apache tika
-*/
-
 package handlers
 
 import (
@@ -18,10 +11,12 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/dannav/starship/services/internal/fileop"
 	"github.com/dannav/starship/services/internal/shared"
 	"github.com/google/uuid"
 	minio "github.com/minio/minio-go"
@@ -36,6 +31,9 @@ import (
 	prose "gopkg.in/jdkato/prose.v2"
 )
 
+// TODO - make configurable through env var and move to app boot
+var localStoragePath = filepath.Clean("/root/.starship/")
+
 // vDims represents how many dimensions a spotify/annoy index vector is (sized returned by tensorflow model)
 var vDims = 512
 
@@ -45,7 +43,8 @@ var MimeToDocType = map[string]int{
 	"application/pdf": document.TypePDF,
 }
 
-var errUnknownMimeType = errors.New("unknown media type")
+// errUnkownMimeType is an error returned from apache tika if trying to parse a file that is not text
+var errUnknownMimeType = errors.New("tikad unknown media type")
 
 // GetDocType gets the document type from a mimeType
 func GetDocType(s string) int {
@@ -59,7 +58,13 @@ func GetDocType(s string) int {
 // Index handles creating word embeddings from a multi-part/file upload and indexing it for search purposes
 func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseWriter, *http.Request, httprouter.Params) {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		teamID := "1" // TODO replace with user auth
+		// TODO - move to app boot
+		err := os.MkdirAll(filepath.Join(localStoragePath, "indexes"), os.ModePerm)
+		if err != nil {
+			err = errors.Wrap(err, "creating .starship dir")
+			web.RespondError(w, r, http.StatusInternalServerError, err)
+			return
+		}
 
 		file, header, err := r.FormFile("content")
 		defer file.Close()
@@ -100,7 +105,6 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 		if strings.Count(path, "/") > 1 && path[0] == '/' {
 			path = strings.Replace(path, "/", "", 1)
 		}
-		// end cleanup
 
 		// pass file to apache tika for parsing to plaintext
 		tikaResp, err := a.TikaParse(file, header.Filename)
@@ -154,29 +158,46 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 		// generate word embeddings from given text
 		es, err := embedding.Generate(inputs, a.ServingURL, a.HTTPClient)
 		if err != nil {
-			err = errors.New("cannot generate embeddings from text")
+			err = errors.Wrap(err, "cannot generate embeddings from text")
 			web.RespondError(w, r, http.StatusServiceUnavailable, err)
 			return
 		}
 
-		// prepare a client to connect to block storage (do spaces)
-		client, err := minio.New(spacesURL, doKey, doSecret, true)
-		if err != nil {
-			err = errors.Wrap(err, "connecting to do spaces")
-			web.RespondError(w, r, http.StatusInternalServerError, err)
-			return
+		// create locations for document
+		fileLocation := fmt.Sprintf("%v/%v/%v", RootFolder, uuid.New().String(), header.Filename)
+		downloadURL := strings.Replace(fileLocation, RootFolder, "", 1)
+
+		// prepare a client to connect to object storage
+		var client *minio.Client
+		var objectStorageURL, localFilePath string
+		if a.ObjectStorageEnabled {
+			client, err = minio.New(a.ObjectStorageConfig.URL, a.ObjectStorageConfig.Key, a.ObjectStorageConfig.Secret, true)
+			if err != nil {
+				err = errors.Wrap(err, "connecting to object storage, is the config provided correct?")
+				web.RespondError(w, r, http.StatusInternalServerError, err)
+				return
+			}
+
+			if client == nil {
+				err := errors.New("could not instantiate client to connect to object storage")
+				web.RespondError(w, r, http.StatusInternalServerError, err)
+				return
+			}
+		} else {
+			localFilePath = filepath.Join(localStoragePath, downloadURL)
 		}
 
-		// prepare to create a document
-		cdnFilename := fmt.Sprintf("%v/%v/%v", teamID, uuid.New().String(), header.Filename)
+		if a.ObjectStorageEnabled {
+			objectStorageURL = fmt.Sprintf("%v.%v/%v", a.ObjectStorageConfig.BucketName, a.ObjectStorageConfig.URL, fileLocation)
+		}
+
 		d := &document.Document{
-			Body:        content, // we store the content so we can do full text search with postgres
-			Name:        header.Filename,
-			TypeID:      GetDocType(tikaResp.DocumentType),
-			DownloadURL: fmt.Sprintf("stuph.%v/%v", spacesURL, cdnFilename),
-			CDNFilename: cdnFilename,
-			Path:        path,
-			TeamID:      teamID,
+			Body:             content, // we store the content so we can do full text search with postgres
+			Name:             header.Filename,
+			TypeID:           GetDocType(tikaResp.DocumentType),
+			ObjectStorageURL: objectStorageURL,
+			DownloadURL:      downloadURL,
+			Path:             path,
 		}
 
 		// check if a document at this path exists and delete it so we can update indexes if it does
@@ -197,11 +218,20 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 				return
 			}
 
-			// delete from do spaces
-			if err := client.RemoveObject("stuph", pDoc.CDNFilename); err != nil {
-				err = errors.Wrapf(err, "deleting object from cdn: %v", pDoc.CDNFilename)
-				web.RespondError(w, r, http.StatusInternalServerError, err)
-				return
+			// delete from object storage
+			if a.ObjectStorageEnabled {
+				if err := client.RemoveObject(a.ObjectStorageConfig.BucketName, pDoc.ObjectStorageURL); err != nil {
+					err = errors.Wrapf(err, "deleting object from object storage: %v", pDoc.ObjectStorageURL)
+					web.RespondError(w, r, http.StatusInternalServerError, err)
+					return
+				}
+			} else {
+				err := fileop.DeleteFile(localFilePath)
+				if err != nil {
+					err = errors.Wrap(err, "using local storage, deleting file")
+					web.RespondError(w, r, http.StatusInternalServerError, err)
+					return
+				}
 			}
 		}
 
@@ -213,29 +243,38 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 			return
 		}
 
-		// store the file in block storage so we can download from a search
-		opts := minio.PutObjectOptions{
-			UserMetadata: map[string]string{
-				"teamID": "1",
-			},
-		}
-
+		// move reader back to beginning of file so we can upload it to object storage or write it
 		file.Seek(0, 0)
-		_, err = client.PutObjectWithContext(context.Background(), "stuph", cdnFilename, file, header.Size, opts)
-		if err != nil {
-			err = errors.Wrap(err, "adding object to do spaces")
-			web.RespondError(w, r, http.StatusInternalServerError, err)
-			return
+
+		// upload file to object storage
+		if a.ObjectStorageEnabled {
+			// store the file in object storage so we can download from a search
+			opts := minio.PutObjectOptions{
+				UserMetadata: map[string]string{},
+			}
+
+			_, err = client.PutObjectWithContext(context.Background(), a.ObjectStorageConfig.BucketName, fileLocation, file, header.Size, opts)
+			if err != nil {
+				err = errors.Wrap(err, "adding object to object storage")
+				web.RespondError(w, r, http.StatusInternalServerError, err)
+				return
+			}
+		} else {
+			err := fileop.WriteFile(file, localFilePath)
+			if err != nil {
+				err = errors.Wrap(err, "using local storage, writing file")
+				web.RespondError(w, r, http.StatusInternalServerError, err)
+				return
+			}
 		}
 
 		// create a new annoy index to load data into
 		t := annoyindex.NewAnnoyIndexAngular(vDims)
 		defer t.Unload()
 
-		// create new store for this team if it does not exist
+		// create new store if it does not exist
 		s := &store.Store{
-			Location: fmt.Sprintf("indexes/%v.ann", teamID),
-			TeamID:   teamID,
+			Location: filepath.Join(localStoragePath, "indexes", "starship.ann"),
 		}
 
 		st, foundStore, err := ss.CreateStoreIfNotExists(s)
@@ -285,9 +324,9 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 
 		// previous store exists so we should load all previously indexed data into annoy
 		if foundStore {
-			ic, err := ds.GetIndexContentForTeam(teamID)
+			ic, err := ds.GetIndexContent()
 			if err != nil {
-				err = errors.Wrap(err, "getting index content for team")
+				err = errors.Wrap(err, "getting index content")
 				web.RespondError(w, r, http.StatusInternalServerError, err)
 				return
 			}
@@ -318,7 +357,6 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 }
 
 // Search performs a search on all documents with the given text
-// TODO :- add filtering by path which requires storing each path in a new annoy index store (so we can query all documents in a path)
 func (a *App) Search(ds *document.Service, ss *store.Service) func(http.ResponseWriter, *http.Request, httprouter.Params) {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 		var b struct {
@@ -347,11 +385,9 @@ func (a *App) Search(ds *document.Service, ss *store.Service) func(http.Response
 			return
 		}
 
-		// TODO :- when authentication is done use users teamID
-		teamID := "1"
-		s, err := ss.GetStoreByTeamID(teamID)
+		s, err := ss.GetStore()
 		if err != nil {
-			err = errors.Wrap(err, "get store by teamID")
+			err = errors.Wrap(err, "get store")
 			web.RespondError(w, r, http.StatusInternalServerError, err)
 			return
 		}
@@ -471,10 +507,6 @@ func (a *App) Search(ds *document.Service, ss *store.Service) func(http.Response
 
 // TikaParse makes a request to the tikad endpoint to parse a file
 func (a *App) TikaParse(file io.Reader, filename string) (*shared.TikaResponse, error) {
-	var parseResp struct {
-		Results shared.TikaResponse `json:"results"`
-	}
-
 	var buf bytes.Buffer
 	encoder := multipart.NewWriter(&buf)
 	field, err := encoder.CreateFormFile("content", filename)
@@ -490,14 +522,14 @@ func (a *App) TikaParse(file io.Reader, filename string) (*shared.TikaResponse, 
 	}
 	encoder.Close()
 
-	endpoint := fmt.Sprintf("http://%v/v1/parse", a.Cfg.TikaURL)
+	endpoint := fmt.Sprintf("%v/v1/parse", a.Cfg.TikaURL)
 	req, err := http.NewRequest(http.MethodPost, endpoint, &buf)
 	if err != nil {
 		err = errors.Wrap(err, "preparing tikad request")
 		return nil, err
 	}
-	req.Header.Set("Content-Type", encoder.FormDataContentType())
 
+	req.Header.Set("Content-Type", encoder.FormDataContentType())
 	res, err := a.HTTPClient.Do(req)
 	if err != nil {
 		err = errors.Wrap(err, "performing tikad request")
@@ -513,7 +545,11 @@ func (a *App) TikaParse(file io.Reader, filename string) (*shared.TikaResponse, 
 		return nil, err
 	}
 
-	// get response from tikad
+	// parse response from tikad
+	var parseResp struct {
+		Results shared.TikaResponse `json:"results"`
+	}
+
 	if err := json.NewDecoder(res.Body).Decode(&parseResp); err != nil {
 		err = errors.Wrap(err, "decoding tikad response")
 		return nil, err

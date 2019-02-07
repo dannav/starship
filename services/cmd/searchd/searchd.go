@@ -7,10 +7,12 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/dannav/starship/services/cmd/searchd/handlers"
+	"github.com/dannav/starship/services/cmd/searchd/healthcheck"
 	"github.com/dannav/starship/services/internal/platform/db"
 	_ "github.com/lib/pq" // postgres sql driver
 	log "github.com/sirupsen/logrus"
@@ -46,6 +48,18 @@ const (
 	// tikadURLEnv is the name of the environment variable that holds the URL
 	// to the tika service which converts documents to plain text
 	tikadURLEnv = "TIKAD_URL"
+
+	// objectStorageURLEnv is the URL to the object storage provider
+	objectStorageURLEnv = "OBJECT_STORAGE_URL"
+
+	// objectStorageBucketNameEnv is the bucket to connect to with your object storage provider
+	objectStorageBucketNameEnv = "OBJECT_STORAGE_BUCKET"
+
+	// objectStorageKey is the key to use when connecting to object storage
+	objectStorageKeyEnv = "OBJECT_STORAGE_KEY"
+
+	// objectStorageSecret is the secret ot use when connecting to object storage
+	objectStorageSecretEnv = "OBJECT_STORAGE_SECRET"
 )
 
 func main() {
@@ -96,7 +110,55 @@ func main() {
 		return
 	}
 
-	// connect to db
+	// wait for tikad to be ready
+	var tikaReady bool
+	for {
+		log.Info("waiting for tikad to be ready")
+		ticker := time.NewTicker(time.Second)
+
+		select {
+		case <-ticker.C:
+			ready, err := healthcheck.TikaServiceReady(tikadURL)
+			if err != nil && strings.Index(err.Error(), "connection refused") == -1 { // skip exiting if the service isn't started yet
+				mainErr = errors.Wrap(err, "tikad connection error")
+				return
+			}
+
+			if ready == true {
+				tikaReady = true
+			}
+		}
+
+		if tikaReady {
+			break
+		}
+	}
+
+	// wait for tfserving to be ready
+	var servingReady bool
+	for {
+		log.Info("waiting for serving to be ready")
+		ticker := time.NewTicker(time.Second)
+
+		select {
+		case <-ticker.C:
+			ready, err := healthcheck.ServingReady(servingURL)
+			if err != nil && strings.Index(err.Error(), "connection refused") == -1 { // skip exiting if the service isn't started yet
+				mainErr = errors.Wrap(err, "serving connection error")
+				return
+			}
+
+			if ready == true {
+				servingReady = true
+			}
+		}
+
+		if servingReady {
+			break
+		}
+	}
+
+	// create new postgres connection
 	dba, err := sqlx.Open("postgres", postgresDSN)
 	if err != nil {
 		mainErr = errors.Wrap(err, "open postgres database")
@@ -108,7 +170,7 @@ func main() {
 	if err := dba.Ping(); err != nil {
 		for {
 			log.Info("waiting for database connection")
-			ticker := time.NewTicker(time.Millisecond * 150)
+			ticker := time.NewTicker(time.Second)
 
 			select {
 			case <-ticker.C:
@@ -123,7 +185,7 @@ func main() {
 		}
 	}
 
-	// create mysql db schema
+	// create db schema
 	if _, err := dba.Exec(db.Schema); err != nil {
 		mainErr = errors.Wrap(err, "creating database schema")
 		return
@@ -151,9 +213,15 @@ func main() {
 	cfg := handlers.Cfg{
 		ServingURL: servingURL,
 		TikaURL:    tikadURL,
+		ObjectStorageConfig: handlers.ObjectStorageCfg{ // get object storage cfg if set in env
+			URL:        os.Getenv(objectStorageURLEnv),
+			BucketName: os.Getenv(objectStorageBucketNameEnv),
+			Key:        os.Getenv(objectStorageKeyEnv),
+			Secret:     os.Getenv(objectStorageSecretEnv),
+		},
 	}
 
-	// start the API
+	// create the API
 	app := handlers.NewApp(cfg, dba, client)
 	server := http.Server{
 		Addr:           port,
@@ -163,14 +231,14 @@ func main() {
 		MaxHeaderBytes: 1 << 20,
 	}
 
-	// starting the service, listening for requests.
+	// starting the API server
 	serverErrors := make(chan error, 1)
 	go func() {
 		log.Infof("server started, listening on %s", port)
 		serverErrors <- server.ListenAndServe()
 	}()
 
-	// blocking main and waiting for shutdown.
+	// blocking main and waiting for shutdown
 	osSignals := make(chan os.Signal, 1)
 	signal.Notify(osSignals, os.Interrupt, syscall.SIGTERM)
 
@@ -184,7 +252,7 @@ func main() {
 	}
 
 	// shutdown server
-	// create context for shutdown call.
+	// create context for shutdown call
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
@@ -195,7 +263,5 @@ func main() {
 		if err := server.Close(); err != nil {
 			mainErr = errors.Wrapf(err, "shutdown: error killing server")
 		}
-
-		return
 	}
 }

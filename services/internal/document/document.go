@@ -60,7 +60,6 @@ type SearchResult struct {
 // Folder represents a folder
 type Folder struct {
 	FolderID uuid.UUID `json:"id" db:"folder_id"`
-	TeamID   string    `json:"teamID" db:"team_id"` // TODO convert to uuid.UUID when auth is in place
 	Name     string    `json:"name" db:"name"`
 	Path     string    `json:"path" db:"path"`
 	Created  time.Time `json:"created" db:"created"`
@@ -69,17 +68,16 @@ type Folder struct {
 
 // Document represents a document that was indexed
 type Document struct {
-	ID          uuid.UUID `json:"id" db:"document_id"`
-	FolderID    uuid.UUID `json:"folderID" db:"folder_id"`
-	TypeID      int       `json:"typeID" db:"document_type_id"`
-	TeamID      string    `json:"teamID" db:"team_id"` // TODO convert to uuid.UUID when auth is in place
-	DownloadURL string    `json:"downloadURL" db:"download_url"`
-	CDNFilename string    `json:"cdnFilename" db:"cdn_filename"`
-	Path        string    `json:"path" db:"path"`
-	Name        string    `json:"name" db:"name"`
-	Body        string    `json:"body" db:"body"`
-	Created     time.Time `json:"created" db:"created"`
-	Updated     time.Time `json:"updated" db:"updated"`
+	ID               uuid.UUID `json:"id" db:"document_id"`
+	FolderID         uuid.UUID `json:"folderID" db:"folder_id"`
+	TypeID           int       `json:"typeID" db:"document_type_id"`
+	ObjectStorageURL string    `json:"objectStorageURL" db:"object_storage_url"`
+	DownloadURL      string    `json:"downloadURL" db:"download_url"`
+	Path             string    `json:"path" db:"path"`
+	Name             string    `json:"name" db:"name"`
+	Body             string    `json:"body" db:"body"`
+	Created          time.Time `json:"created" db:"created"`
+	Updated          time.Time `json:"updated" db:"updated"`
 }
 
 // Sentence represents indexed sentence from a document
@@ -119,20 +117,10 @@ func NewService(db *sqlx.DB) *Service {
 	return &s
 }
 
-// GetIndexContentForTeam gets all content previously indexed for a team for rebuilding the index
-func (s *Service) GetIndexContentForTeam(teamID string) ([]Sentence, error) {
-	stmt, err := s.DB.PrepareNamed(getIndexContentForTeam)
-	if err != nil {
-		return nil, errors.Wrap(err, "preparing get index content query")
-	}
-	defer stmt.Close()
-
-	args := map[string]interface{}{
-		"teamID": teamID,
-	}
-
+// GetIndexContent gets all content previously indexed to rebuild the index
+func (s *Service) GetIndexContent() ([]Sentence, error) {
 	var r []Sentence
-	if err := stmt.Select(&r, args); err != nil {
+	if err := s.DB.Select(&r, getIndexContent); err != nil {
 		return nil, errors.Wrap(err, "get index content query")
 	}
 
@@ -164,8 +152,7 @@ func (s *Service) GetFolderByPath(path string) (*Folder, error) {
 	defer stmt.Close()
 
 	args := map[string]interface{}{
-		"path":   cleanPath(path),
-		"teamID": "1",
+		"path": cleanPath(path),
 	}
 
 	var r Folder
@@ -211,10 +198,9 @@ func (s *Service) CreateFolderPath(path string, recursing bool) (string, error) 
 
 	folderID := uuid.New()
 	args := map[string]interface{}{
-		"id":     folderID,
-		"teamID": "1",
-		"name":   name,
-		"path":   cleanPath(path),
+		"id":   folderID,
+		"name": name,
+		"path": cleanPath(path),
 	}
 
 	// insert does not error on duplicates, check rows affected to check if we need to get the folder_id
@@ -344,15 +330,14 @@ func (s *Service) CreateDocument(d *Document) (*Document, error) {
 	}
 
 	args := map[string]interface{}{
-		"id":          uuid.New(),
-		"typeID":      d.TypeID,
-		"teamID":      d.TeamID,
-		"name":        d.Name,
-		"body":        d.Body,
-		"path":        cleanPath(path) + "." + d.Name,
-		"downloadURL": d.DownloadURL,
-		"folderID":    folderID,
-		"cdnFilename": d.CDNFilename,
+		"id":               uuid.New(),
+		"typeID":           d.TypeID,
+		"name":             d.Name,
+		"body":             d.Body,
+		"path":             cleanPath(path) + "." + d.Name,
+		"objectStorageURL": d.ObjectStorageURL,
+		"downloadURL":      d.DownloadURL,
+		"folderID":         folderID,
 	}
 
 	var r Document
