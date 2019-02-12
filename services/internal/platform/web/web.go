@@ -13,7 +13,7 @@ var ErrInternalServer = errors.New("internal server error")
 
 // Response is the format used for all the responses.
 type Response struct {
-	Results interface{}     `json:"results"`
+	Results interface{}     `json:"results,omitempty"`
 	Errors  []ResponseError `json:"errors,omitempty"`
 }
 

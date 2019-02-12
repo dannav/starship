@@ -1,7 +1,6 @@
 package command
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"github.com/dannav/starship/cli/internal/output"
 	"github.com/dannav/starship/cli/internal/uerrors"
 	tb "github.com/nsf/termbox-go"
+	"github.com/pkg/errors"
 )
 
 // Search performs a search against all documents in the Starship API
@@ -29,6 +29,11 @@ func Search(args []string, e *engine.Engine) error {
 
 	searchResults, err := e.Search(searchText)
 	if err != nil {
+		fmt.Println("")
+		if err := errors.Cause(err); err == engine.ErrUnauthorized {
+			return engine.ErrUnauthorized
+		}
+
 		return errors.New(uerrors.SearchRequestFailed)
 	}
 	s.Stop()
@@ -156,7 +161,7 @@ func Search(args []string, e *engine.Engine) error {
 				case 'n':
 					goto nextResult
 				case 'd':
-					break // we already downloaed a file on this iteration don't do anything
+					break // we already downloaded a file on this iteration don't do anything
 				case 'q':
 					goto quit
 				default:

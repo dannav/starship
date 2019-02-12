@@ -74,6 +74,14 @@ const (
 
 	// storageDir is the root folder to store cfg, indexes, and files given the storagePath
 	storageDir = ".starship"
+
+	// indexKeyEnv is the environment variable which holds an API key to limit who can index documents to clients which provide this key
+	// client should pass header X-INDEX-KEY with value of this environment variable.
+	indexKeyEnv = "INDEX_KEY"
+
+	// accessKeyEnv is the environment variable which holds an API key to limit who can visit all endpoints besides /index and /ready to
+	// clients which provide this key. client should pass header X-ACCESS-KEY with value of this environment variable.
+	accessKeyEnv = "ACCESS_KEY"
 )
 
 func main() {
@@ -149,6 +157,10 @@ func main() {
 	} else {
 		storagePath = filepath.Clean(storagePath)
 	}
+
+	// security env vars
+	indexKey := os.Getenv(indexKeyEnv)
+	accessKey := os.Getenv(accessKeyEnv)
 
 	// create storagePath deepest dir (indexes)
 	err = os.MkdirAll(filepath.Join(storagePath, "indexes"), os.ModePerm)
@@ -262,6 +274,8 @@ func main() {
 		ModelVectorDims: vDims,
 		TikaURL:         tikadURL,
 		StoragePath:     storagePath,
+		IndexKey:        indexKey,
+		AccessKey:       accessKey,
 		ObjectStorageConfig: handlers.ObjectStorageCfg{ // get object storage cfg if set in env
 			URL:        os.Getenv(objectStorageURLEnv),
 			BucketName: os.Getenv(objectStorageBucketNameEnv),

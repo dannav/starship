@@ -39,6 +39,11 @@ services:
       MODEL_URL: "http://serving:8501/v1/models/universal_encoder"
       MODEL_VECTOR_DIMENSIONS: 512
       TIKAD_URL: "http://tikad:8080"
+      # uncomment to provide security, indexing through cli requires both index_key and access_key
+      # INDEX_KEY: "abc"
+      # ACCESS_KEY: "123"
+      # uncomment to change storage path on object storage or local machine
+      # STORAGE_PATH: "starship_documents"
       # uncomment to use object storage
       # OBJECT_STORAGE_URL: "sfo2.digitaloceanspaces.com"
       # OBJECT_STORAGE_KEY: "E7GJPSBYFMF5SJU7P4TC"

@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -12,6 +13,16 @@ import (
 	"github.com/dannav/starship/cli/internal/help"
 	"github.com/dannav/starship/cli/internal/log"
 	"github.com/dannav/starship/cli/internal/uerrors"
+)
+
+const (
+	// indexKeyEnv is the environment variable which holds an API key to access the index
+	// endpoint of a protected starship instance
+	indexKeyEnv = "INDEX_KEY"
+
+	// accessKeyEnv is the environment variable which holds an API key to access all other
+	// endpoints besides index and ready of a protected starship instance
+	accessKeyEnv = "ACCESS_KEY"
 )
 
 // general cfg
@@ -64,7 +75,9 @@ func main() {
 	cmd = strings.ToLower(flag.Arg(0))
 
 	// check to see if the starship API is up and functioning
-	e := engine.NewEngine(client)
+	indexKey := os.Getenv(indexKeyEnv)
+	accessKey := os.Getenv(accessKeyEnv)
+	e := engine.NewEngine(client, indexKey, accessKey)
 
 	// load or set config if we need it for the command we are running
 	if cmd == "index" || cmd == "search" {

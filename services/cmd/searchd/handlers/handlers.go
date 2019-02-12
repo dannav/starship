@@ -9,7 +9,6 @@ import (
 	"github.com/dannav/starship/services/internal/store"
 	"github.com/jmoiron/sqlx"
 	"github.com/julienschmidt/httprouter"
-	_ "github.com/lib/pq" // pq is the postgresql driver configuration
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -39,6 +38,8 @@ type Cfg struct {
 	ModelVectorDims     int
 	TikaURL             string
 	StoragePath         string
+	IndexKey            string
+	AccessKey           string
 	ObjectStorageConfig ObjectStorageCfg
 }
 
@@ -79,16 +80,15 @@ func (a *App) initHandler() {
 		web.RespondError(w, r, http.StatusNotFound, errors.New("not found"))
 	})
 
-	// gracefully handle and recover from web panics
+	// gracefully handle and recover from web panics, print stack to log for debugging purposes
 	r.PanicHandler = func(w http.ResponseWriter, r *http.Request, i interface{}) {
-		log.WithFields(log.Fields{
-			"error": i,
-		}).Error("panic")
-
 		stack := make([]byte, 4096)
 		stack = stack[:runtime.Stack(stack, false)]
 
-		log.Println(string(stack))
+		log.WithFields(log.Fields{
+			"error": i,
+			"stack": string(stack),
+		}).Error("panic")
 
 		web.RespondError(w, r, http.StatusInternalServerError, web.ErrInternalServer)
 	}
@@ -97,15 +97,20 @@ func (a *App) initHandler() {
 	ds := document.NewService(a.DB)
 	ss := store.NewService(a.DB)
 
-	// api routes
+	// get keys for authentication purposes
+	indexKey := a.IndexKey
+	accessKey := a.AccessKey
+
+	// ready route responds when the server is booted up and ready to accept incoming connections
 	r.Handle(http.MethodGet, "/ready", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 		web.Respond(w, r, http.StatusOK, nil)
 	})
 
-	r.Handle(http.MethodPost, "/v1/index", a.Index(ds, ss))
-	r.Handle(http.MethodGet, "/v1/search", a.Search(ds, ss))
-	r.Handle(http.MethodGet, "/v1/download", a.DownloadFile())
-	r.Handle(http.MethodGet, "/v1/exists", a.CheckFileExistence(ds))
+	// define api routes
+	r.Handle(http.MethodPost, "/v1/index", IndexAuthorized(a.Index(ds, ss), indexKey))
+	r.Handle(http.MethodGet, "/v1/search", AccessAuthorized(a.Search(ds, ss), accessKey))
+	r.Handle(http.MethodGet, "/v1/download", AccessAuthorized(a.DownloadFile(), accessKey))
+	r.Handle(http.MethodGet, "/v1/exists", AccessAuthorized(a.CheckFileExistence(ds), accessKey))
 
 	// wrap all the routes with global middleware
 	a.handler = web.RequestMW(r)

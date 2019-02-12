@@ -166,7 +166,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 			client, err = minio.New(a.ObjectStorageConfig.URL, a.ObjectStorageConfig.Key, a.ObjectStorageConfig.Secret, true)
 			if err != nil {
 				err = errors.Wrap(err, "connecting to object storage, is the config provided correct?")
-				web.RespondError(w, r, http.StatusInternalServerError, err)
+				web.RespondError(w, r, http.StatusServiceUnavailable, err)
 				return
 			}
 
@@ -176,7 +176,7 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 				return
 			}
 		} else {
-			localFilePath = filepath.Join(a.StoragePath, downloadURL)
+			localFilePath = filepath.Join(a.StoragePath, RootFolder, downloadURL)
 		}
 
 		if a.ObjectStorageEnabled {

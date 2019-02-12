@@ -13,7 +13,6 @@ The commands are:
 
 	index     store a document in the search engine
 	search    search all documents for relevant information
-	set       set cli config
 
 Use "starship help [command]" for more information about a command.
 `
