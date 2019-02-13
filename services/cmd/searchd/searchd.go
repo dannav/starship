@@ -68,7 +68,7 @@ const (
 	// objectStorageSecret is the secret ot use when connecting to object storage
 	objectStorageSecretEnv = "OBJECT_STORAGE_SECRET"
 
-	// storagePathEnv is the location to store the index and if no object storage is used documents
+	// storagePathEnv is the location to store the index, of object storage is not configured documents are stored here has well
 	// ensure that the user running this app has permissions to read / write here
 	storagePathEnv = "STORAGE_PATH"
 
