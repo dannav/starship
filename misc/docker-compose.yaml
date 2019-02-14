@@ -40,8 +40,8 @@ services:
       MODEL_VECTOR_DIMENSIONS: 512
       TIKAD_URL: "http://tikad:8080"
       # uncomment to provide security, indexing through cli requires both index_key and access_key
-      # INDEX_KEY: "abc"
-      # ACCESS_KEY: "123"
+      # INDEX_KEY: "foo"
+      # ACCESS_KEY: "bar"
       # uncomment to change storage path on object storage or local machine
       # STORAGE_PATH: "starship_documents"
       # uncomment to use object storage

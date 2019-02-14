@@ -82,6 +82,7 @@ export const HeadContent = () => {
       }
 
       h2 {
+        margin-top: 1.5rem;
         font-size: 1.114rem;
       }
 

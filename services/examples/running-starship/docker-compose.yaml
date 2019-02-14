@@ -1,0 +1,61 @@
+version: '3'
+networks:
+  shared-network:
+    driver: bridge
+services:
+  serving: # a production grade rest / grpc api for machine learning models
+    image: tensorflow/serving
+    restart: on-failure
+    networks:
+      - shared-network
+    ports:
+      - '8501:8501'
+    volumes:
+      - ./use:/models/universal_encoder
+    environment:
+      MODEL_NAME: "universal_encoder"
+  db: # postgres database used by starship
+    image: postgres:11.0-alpine
+    restart: on-failure
+    networks:
+      - shared-network
+    ports:
+      - 5432:5432
+    volumes:
+      - db:/var/lib/postgresql
+    environment:
+      POSTGRES_PASSWORD: "password"
+  searchd: # search / indexing api
+    image: searchd
+    networks:
+      - shared-network
+    ports:
+    - '8080:8080'
+    restart: on-failure
+    volumes:
+      - searchd:/opt
+    environment:
+      POSTGRES_DSN: "user=postgres password=password host=db dbname=postgres sslmode=disable"
+      MODEL_URL: "http://serving:8501/v1/models/universal_encoder"
+      MODEL_VECTOR_DIMENSIONS: 512
+      TIKAD_URL: "http://tikad:8080"
+      # uncomment to provide security, indexing through cli requires both index_key and access_key
+      # INDEX_KEY: "foo"
+      # ACCESS_KEY: "bar"
+      # uncomment to change storage path on object storage or local machine
+      # STORAGE_PATH: "starship_documents"
+      # uncomment to use object storage
+      # OBJECT_STORAGE_URL: "XXX"
+      # OBJECT_STORAGE_KEY: "XXX"
+      # OBJECT_STORAGE_SECRET: "XXX"
+      # OBJECT_STORAGE_BUCKET: "XXX"
+  tikad: # document parsing api
+    image: tikad
+    networks:
+      - shared-network
+    ports:
+    - '8081:8080'
+    restart: on-failure
+volumes:
+  db: {}
+  searchd: {}

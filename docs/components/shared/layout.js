@@ -131,6 +131,11 @@ export default connect(state => state)(
             display: block;
           }
 
+          .homepage img {
+            margin: 0 auto;
+            width: 100%;
+          }
+
           .section h2 {
             margin: 0;
             padding-bottom: .25rem;

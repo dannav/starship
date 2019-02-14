@@ -42,7 +42,7 @@ retrieval using the search command.
 
 ### EXAMPLE
 
-`starship -p company index ./path/to/employee-handbook.pdf`
+`starship index ./path/to/employee-handbook.pdf`
 
 Think of the Starship search index as a logical directory of where files are stored.
 
