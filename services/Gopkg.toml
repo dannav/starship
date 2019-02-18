@@ -64,3 +64,7 @@
 [[constraint]]
   branch = "v2"
   name = "gopkg.in/jdkato/prose.v2"
+
+[[constraint]]
+  name = "github.com/docker/docker"
+  version = "1.13.1"

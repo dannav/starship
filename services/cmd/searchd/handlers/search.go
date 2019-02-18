@@ -31,19 +31,14 @@ import (
 	prose "gopkg.in/jdkato/prose.v2"
 )
 
-// ******
-// TODO - make loading of indexes faster - we can always store the index in memory so search and index functions
-// do not need to reload it from disk every time a request is made
-// ******
+// errUnkownMimeType is an error returned from apache tika if trying to parse a file that is not text
+var errUnknownMimeType = errors.New("tikad unknown media type")
 
 // MimeToDocType translates a tika mimeType to a document type
 var MimeToDocType = map[string]int{
 	"text/plain":      document.TypeMarkdown,
 	"application/pdf": document.TypePDF,
 }
-
-// errUnkownMimeType is an error returned from apache tika if trying to parse a file that is not text
-var errUnknownMimeType = errors.New("tikad unknown media type")
 
 // GetDocType gets the document type from a mimeType
 func GetDocType(s string) int {
@@ -52,6 +47,12 @@ func GetDocType(s string) int {
 	}
 
 	return MimeToDocType[s]
+}
+
+// SearchResponse is the response body from the search endpoint
+type SearchResponse struct {
+	Distances []float32               `json:"distances"`
+	Documents []document.SearchResult `json:"documents"`
 }
 
 // Index handles creating word embeddings from a multi-part/file upload and indexing it for search purposes
@@ -66,12 +67,15 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 			return
 		}
 
+		// TODO := do validation on path provided. if it contains invalid characters return
+		// bad request
+
 		path := r.Header.Get("X-PATH")
 		if path == "" {
 			path = "/"
 		}
 
-		// TODO - replace with filepath.Clean() and test
+		// TODO - replace with filepath.Clean()
 		// if path is multiple dirs remove any possible trailing or repeating '/'
 	cleanpath:
 		if path != "/" {
@@ -352,11 +356,6 @@ func (a *App) Index(ds *document.Service, ss *store.Service) func(http.ResponseW
 // Search performs a search on all documents with the given text
 func (a *App) Search(ds *document.Service, ss *store.Service) func(http.ResponseWriter, *http.Request, httprouter.Params) {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		type SearchResponse struct {
-			Distances []float32               `json:"distances"`
-			Documents []document.SearchResult `json:"documents"`
-		}
-
 		var b struct {
 			Text string `json:"text"`
 		}

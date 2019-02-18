@@ -13,3 +13,10 @@ build_tikad:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ./bin/tikad ./cmd/tikad
 
 build: run_build_container build_tikad
+
+test:
+	# NOTICE
+	# ======
+	# ensure that annoy is installed before running tests
+	# run: `sudo pip install annoy`
+	go test ./cmd/searchd/...

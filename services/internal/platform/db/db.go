@@ -12,7 +12,7 @@ const Schema = `
 
 	CREATE TABLE IF NOT EXISTS folder (
 		folder_id UUID NOT NULL PRIMARY KEY,
-    name TEXT NOT NULL,
+		name TEXT NOT NULL,
 		path ltree,
 		created TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
 		updated TIMESTAMPTZ NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),

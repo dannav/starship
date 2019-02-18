@@ -256,18 +256,6 @@ func (e *Engine) Index(filePath, filename, indexPath string) error {
 	buf := &bytes.Buffer{}
 	encoder := multipart.NewWriter(buf)
 
-	pathField, err := encoder.CreateFormField("path")
-	if err != nil {
-		err = errors.Wrap(err, "creating path form field for index request")
-		return err
-	}
-
-	_, err = pathField.Write([]byte(indexPath))
-	if err != nil {
-		err = errors.Wrap(err, "writing index path to index request")
-		return err
-	}
-
 	contentField, err := encoder.CreateFormFile("content", filename)
 	if err != nil {
 		err = errors.Wrap(err, "creating content form field for index request")
@@ -296,6 +284,7 @@ func (e *Engine) Index(filePath, filename, indexPath string) error {
 		return err
 	}
 	SetHeader(req, "Content-Type", encoder.FormDataContentType())
+	SetHeader(req, "X-PATH", indexPath)
 
 	if e.IndexKey != "" {
 		SetHeader(req, indexKeyHeader, e.IndexKey)

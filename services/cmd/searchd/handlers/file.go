@@ -79,6 +79,7 @@ func (a *App) DownloadFile() func(http.ResponseWriter, *http.Request, httprouter
 func (a *App) CheckFileExistence(ds *document.Service) func(http.ResponseWriter, *http.Request, httprouter.Params) {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 		path := r.URL.Query().Get("path")
+
 		_, err := ds.GetDocumentByPath(path)
 		if err != nil {
 			if err := errors.Cause(err); err == sql.ErrNoRows {
@@ -105,9 +106,6 @@ func getFileContentType(f *os.File) (string, error) {
 		return "", err
 	}
 
-	// always returns a valid content-type by returning "application/octet-stream"
-	// if no others seemed to match.
-	contentType := http.DetectContentType(buffer)
-
-	return contentType, nil
+	// return content type or "application/octet-stream" if not match is found
+	return http.DetectContentType(buffer), nil
 }
