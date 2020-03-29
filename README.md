@@ -14,3 +14,5 @@ Even if you have no need for this project it might help anyone interested in lea
 Enjoy 🥳
 
 ~ Danny
+
+p.s. You can view the documentation by running `npm run dev` in the `./docs` folder. A documentation website will be spun up.
