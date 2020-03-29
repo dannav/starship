@@ -1,5 +1,7 @@
 # starship
 
+To see it in action checkout the gifs here https://github.com/dannav/starship/tree/master/services
+
 Starship is a full text search engine and indexer for any kind of text document (pdf/word/txt/rtf/etc...). I pursued this project last year (EOY 2018 - JAN 2019) as
 a small experiment while researching ways to index documents.
 
