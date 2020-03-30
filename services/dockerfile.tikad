@@ -1,0 +1,5 @@
+# dockerfile for the tikad service
+FROM openjdk:8-jre-alpine
+COPY ./bin/tikad .
+EXPOSE 8080
+CMD ["./tikad"]

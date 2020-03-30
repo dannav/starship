@@ -1,0 +1,5 @@
+bin
+testdata
+vendor
+*.DS_Store
+*.jar
